@@ -10,7 +10,10 @@ def generate_id():
 def now_jakarta():
     # Menggunakan Asia/Jakarta dengan fallback ke UTC
     try:
-        return datetime.now(ZoneInfo("Asia/Jakarta"))
+        jakarta = ZoneInfo("Asia/Jakarta")
+        # Gunakan UTC lalu konversi ke Asia/Jakarta secara eksplisit
+        utc_now = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC"))
+        return utc_now.astimezone(jakarta)
     except Exception:
         return datetime.utcnow()
 
@@ -25,6 +28,6 @@ class CountIP(Base):
     event_severity_label = Column(String)
     destination_port = Column(String)
     counts = Column(BigInteger)
-    created_date = Column(TIMESTAMP, default=now_jakarta)
+    created_date = Column(TIMESTAMP(timezone=True), default=now_jakarta)
     first_seen_event = Column(TIMESTAMP, default=datetime.utcnow)
     last_seen_event = Column(TIMESTAMP, default=datetime.utcnow)
