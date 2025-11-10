@@ -13,8 +13,8 @@ def get_time_range_filter(timeframe: str):
         start = now - timedelta(days=1)
     elif timeframe == "8hours" or timeframe == "last8hours":
         start = now - timedelta(hours=8)
-    elif timeframe == "16hours" or timeframe == "last16hours":
-        start = now - timedelta(hours=16)
+    elif timeframe == "24hours" or timeframe == "last24hours":
+        start = now - timedelta(hours=24)
     elif timeframe == "last3days":
         start = now - timedelta(days=3)
     elif timeframe == "last7days":
