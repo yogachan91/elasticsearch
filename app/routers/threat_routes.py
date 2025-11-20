@@ -4,9 +4,6 @@ from ..database import get_db
 from ..models import CountIP
 from ..services import (
     get_threat_counts,
-    get_unique_source_ip_per_rule,
-    get_top_destination_ip,
-    get_first_last_event,
     save_to_db,
 )
 import requests
@@ -27,17 +24,7 @@ def threat_counts(timeframe: str = Query("yesterday"), db: Session = Depends(get
     save_to_db(data, db)
     return {"message": f"{len(data)} records berhasil disimpan ke DB", "data": data}
 
-@router.get("/unique-source")
-def unique_source_ips(timeframe: str = Query("yesterday")):
-    return get_unique_source_ip_per_rule(timeframe)
 
-@router.get("/top-dest")
-def top_destination(timeframe: str = Query("yesterday")):
-    return get_top_destination_ip(timeframe)
-
-@router.get("/timeline")
-def first_last(ip: str):
-    return get_first_last_event(ip)
 
 # ✅ Tambahan baru: ambil data dari PostgreSQL
 @router.get("/from-db")
@@ -81,7 +68,10 @@ def transfer_countip(db: Session = Depends(get_db)):
             "counts": row.counts,
             "created_date": row.created_date.isoformat() if row.created_date else None,
             "first_seen_event": row.first_seen_event.isoformat() if row.first_seen_event else None,
-            "last_seen_event": row.last_seen_event.isoformat() if row.last_seen_event else None
+            "last_seen_event": row.last_seen_event.isoformat() if row.last_seen_event else None,
+            "modul": row.modul,
+            "sub_type": row.sub_type,
+            "tipe": row.tipe
         })
 
     # 3) Kirim ke Supabase temanmu

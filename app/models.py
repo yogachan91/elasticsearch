@@ -31,3 +31,6 @@ class CountIP(Base):
     created_date = Column(TIMESTAMP(timezone=True), default=now_jakarta)
     first_seen_event = Column(TIMESTAMP, default=datetime.utcnow)
     last_seen_event = Column(TIMESTAMP, default=datetime.utcnow)
+    modul = Column(String)
+    sub_type = Column(String)
+    tipe = Column(String)

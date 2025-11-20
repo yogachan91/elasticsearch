@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 import os
 
 INDEX = os.getenv("ELASTIC_INDEX")
+INDEX_PANW = ".ds-logs-panw.panos-default-*"
 
 def get_time_range_filter(timeframe: str):
     now = datetime.utcnow()
@@ -19,175 +20,181 @@ def get_time_range_filter(timeframe: str):
         start = now - timedelta(days=3)
     elif timeframe == "last7days":
         start = now - timedelta(days=7)
+    elif timeframe == "last20days":
+        start = now - timedelta(days=20)
+    elif timeframe == "last90days":
+        start = now - timedelta(days=90)
     else:
         start = now - timedelta(days=1)
     return {"range": {"@timestamp": {"gte": start.isoformat(), "lte": now.isoformat()}}}
 
 def get_threat_counts(timeframe: str):
+    # query = {
+    #     "size": 0,
+    #     "query": {
+    #         "bool": {
+    #             "filter": [
+    #                 get_time_range_filter(timeframe),
+    #                 {"term": {"event.module": "suricata"}}
+    #             ]
+    #         }
+    #     },
+    #     "aggs": {
+    #         "by_rule": {
+    #             "terms": {"field": "rule.name.keyword", "size": 1000},
+    #             "aggs": {
+    #                 "sample_event": {
+    #                     "top_hits": {
+    #                         "size": 1,
+    #                         "sort": [
+    #                         {"@timestamp": {"order": "desc"}}
+    #                         ],  
+    #                         "_source": [
+    #                             "source.ip",
+    #                             "destination.ip",
+    #                             "rule.category",
+    #                             "destination.geo.country_name",
+    #                             "event.severity_label",
+    #                             "destination.port",
+    #                             "@timestamp"
+    #                         ]
+    #                     }
+    #                 },
+                    #Tambahan: ambil waktu pertama dan terakhir event
+    #                 "first_event": {"min": {"field": "@timestamp"}},
+    #                 "last_event": {"max": {"field": "@timestamp"}}
+    #             }
+    #         }
+    #     }
+    # }
+    
+
+    # res = es.search(index=INDEX, body=query)
+
+    # results = []
+    # for bucket in res["aggregations"]["by_rule"]["buckets"]:
+    #     hit = bucket["sample_event"]["hits"]["hits"][0]["_source"] if bucket["sample_event"]["hits"]["hits"] else {}
+
+    #     results.append({
+    #         "rule_name": bucket["key"],
+    #         "module": "suricata",
+    #         "sub_type": hit.get("rule", {}).get("category"),
+    #         "tipe": "No",
+    #         "source_ip": hit.get("source", {}).get("ip"),
+    #         "destination_ip": hit.get("destination", {}).get("ip"),
+    #         "destination_geo_country_name": hit.get("destination", {}).get("geo", {}).get("country_name"),
+    #         "event_severity_label": hit.get("event", {}).get("severity_label"),
+    #         "destination_port": hit.get("destination", {}).get("port"),
+    #         "count": bucket["doc_count"],
+    #         "first_event": bucket["first_event"]["value_as_string"] if bucket["first_event"].get("value_as_string") else None,
+    #         "last_event": bucket["last_event"]["value_as_string"] if bucket["last_event"].get("value_as_string") else None,
+    #     })
+
+    # return results
+
+    #Data Sophos
+    
+    # query = {
+    #     "size": 500,  
+    #     "query": {
+    #         "bool": {
+    #             "filter": [
+    #                 get_time_range_filter(timeframe),
+    #                 {"term": {"event.module": "sophos"}},
+    #                 {"term": {"sophos.xg.log_type": "Content Filtering"}}
+    #             ]
+    #         }
+    #     },
+    #     "sort": [
+    #         {"@timestamp": {"order": "desc"}}
+    #     ]
+    # }
+
+    # res = es.search(index=INDEX, body=query)
+    # hits = res.get("hits", {}).get("hits", [])
+    # results = []
+
+    # for h in hits:
+    #     src = h["_source"]
+    #     sophos = src.get("sophos", {}).get("xg", {})
+
+    #    mapping rule_name
+        # rule_name = (
+        #     sophos.get("message") #rule_name IDP
+        #     or sophos.get("rule_name") #rule_name Content Filtering
+        #     or "unknown"
+        # )
+
+        # results.append({
+        #     "rule_name": rule_name,
+        #     "module": "sophos",
+        #     "sub_type": sophos.get("log_type"),
+        #     "tipe": "No",
+        #     "source_ip": src.get("source", {}).get("ip"),
+        #     "destination_ip": src.get("destination", {}).get("ip"),
+        #     "destination_geo_country_name": src.get("destination", {}).get("geo", {}).get("country_name"),
+        #     "event_severity_label": src.get("event", {}).get("severity_label") or src.get("log", {}).get("level"),
+        #     "destination_port": src.get("destination", {}).get("port") or sophos.get("dst_port"),
+            
+            # raw hits = count 1
+        #    "count": 1,
+
+            # timestamps sama (karena raw)
+    #           "first_event": src.get("@timestamp"),
+    #           "last_event": src.get("@timestamp"),
+    #       })
+
+    # return results
+
+    #Data Panw
+
     query = {
-        "size": 0,
+        "size": 500,
         "query": {
             "bool": {
                 "filter": [
                     get_time_range_filter(timeframe),
-                    {"term": {"tags": "alert"}}
+                    {"term": {"event.module": "panw"}},
+                    {"term": {"panw.panos.type": "THREAT"}},
+                    {"term": {"panw.panos.sub_type": "file"}}
                 ]
             }
         },
-        "aggs": {
-            "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 1000},
-                "aggs": {
-                    "sample_event": {
-                        "top_hits": {
-                            "size": 1,  # ambil 1 contoh dokumen per rule
-                            "_source": [
-                                "source.ip",
-                                "destination.ip",
-                                "destination.geo.country_name",
-                                "event.severity_label",
-                                "destination.port",
-                                "@timestamp"
-                            ]
-                        }
-                    },
-                    # Tambahan: ambil waktu pertama dan terakhir event
-                    "first_event": {"min": {"field": "@timestamp"}},
-                    "last_event": {"max": {"field": "@timestamp"}}
-                }
-            }
-        }
+        "sort": [{"@timestamp": {"order": "desc"}}]
     }
 
-    res = es.search(index=INDEX, body=query)
+    res = es.search(index=INDEX_PANW, body=query)
+    hits = res.get("hits", {}).get("hits", [])
 
     results = []
-    for bucket in res["aggregations"]["by_rule"]["buckets"]:
-        hit = bucket["sample_event"]["hits"]["hits"][0]["_source"] if bucket["sample_event"]["hits"]["hits"] else {}
+
+    for h in hits:
+        src = h["_source"]
+        panw = src.get("panw", {}).get("panos", {})
 
         results.append({
-            "rule_name": bucket["key"],
-            "source_ip": hit.get("source", {}).get("ip"),
-            "destination_ip": hit.get("destination", {}).get("ip"),
-            "destination_geo_country_name": hit.get("destination", {}).get("geo", {}).get("country_name"),
-            "event_severity_label": hit.get("event", {}).get("severity_label"),
-            "destination_port": hit.get("destination", {}).get("port"),
-            "count": bucket["doc_count"],
-            "first_event": bucket["first_event"]["value_as_string"] if bucket["first_event"].get("value_as_string") else None,
-            "last_event": bucket["last_event"]["value_as_string"] if bucket["last_event"].get("value_as_string") else None,
+    #       "rule_name": panw.get("ruleset") or panw.get("threat", {}).get("name") or "unknown", # tipe Content Filtering
+            "rule_name": panw.get("threat", {}).get("name"),
+            "module": "panw",
+            "sub_type": panw.get("sub_type"),
+            "tipe": panw.get("type"),
+            "action": panw.get("action"),
+            "source_ip": src.get("source", {}).get("ip"),
+            "destination_ip": src.get("destination", {}).get("ip"),
+            "destination_geo_country_name": src.get("destination", {}).get("geo", {}).get("country_name"),
+            "event_severity_label": src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"),
+            "destination_port": src.get("destination", {}).get("port"),
+
+            # setiap hit = count 1
+            "count": 1,
+
+            "first_event": src.get("@timestamp"),
+            "last_event": src.get("@timestamp")
         })
 
-    return results
+    return results  
 
-def get_unique_source_ip_per_rule(timeframe: str):
-    query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "filter": [
-                    get_time_range_filter(timeframe),
-                    {"term": {"tags": "alert"}}
-                ]
-            }
-        },
-        "aggs": {
-            "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 100},
-                "aggs": {
-                    # hitung jumlah unique IP
-                    "unique_source": {
-                        "cardinality": {"field": "source.ip.keyword"}
-                    },
-                    # tampilkan daftar IP
-                    "source_ips": {
-                        "terms": {"field": "source.ip.keyword", "size": 1000},
-                        "aggs": {
-                            # ambil hostname per IP (kalau ada)
-                            "hostnames": {
-                                "terms": {"field": "source.hostname.keyword", "size": 100}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
-    res = es.search(index=INDEX, body=query)
-
-    results = []
-    for bucket in res["aggregations"]["by_rule"]["buckets"]:
-        ip_list = []
-        hostname_set = set()
-
-        # Loop semua IP yang ditemukan
-        for ip_bucket in bucket["source_ips"]["buckets"]:
-            ip_list.append(ip_bucket["key"])
-            # Loop hostname dari setiap IP
-            for h_bucket in ip_bucket["hostnames"]["buckets"]:
-                hostname_set.add(h_bucket["key"])
-
-        results.append({
-            "rule_name": bucket["key"],
-            "hostnames": len(hostname_set),  # total unique hostname
-            "source_IP": len(ip_list),       # total IP ditemukan
-            "unique_source_ips": bucket["unique_source"]["value"],  # jumlah IP unik
-            "unique_source_ips_list": ip_list  # daftar IP
-        })
-
-    return results
-
-def get_top_destination_ip(timeframe: str):
-    query = {
-        "size": 0,
-        "query": {"bool": {"filter": [get_time_range_filter(timeframe), {"term": {"tags": "alert"}}]}},
-        "aggs": {
-            "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 100},
-                "aggs": {
-                    "by_source": {
-                        "terms": {"field": "source.ip.keyword", "size": 100},
-                        "aggs": {
-                            "top_dest": {"terms": {"field": "destination.ip.keyword", "size": 1}}
-                        }
-                    }
-                }
-            }
-        }
-    }
-    res = es.search(index=INDEX, body=query)
-    results = []
-    for rule_bucket in res["aggregations"]["by_rule"]["buckets"]:
-        rule_name = rule_bucket["key"]
-        for src_bucket in rule_bucket["by_source"]["buckets"]:
-            src_ip = src_bucket["key"]
-            top_dest = src_bucket["top_dest"]["buckets"][0]["key"] if src_bucket["top_dest"]["buckets"] else None
-            results.append({"rule_name": rule_name, "source_ip": src_ip, "top_destination_ip": top_dest})
-    return results
-
-def get_first_last_event(ip_address: str):
-    query = {
-        "size": 0,
-        "query": {"term": {"source.ip.keyword": ip_address}},
-        "aggs": {
-            "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 100},
-                "aggs": {
-                    "first_event": {"min": {"field": "@timestamp"}},
-                    "last_event": {"max": {"field": "@timestamp"}}
-                }
-            }
-        }
-    }
-    res = es.search(index=INDEX, body=query)
-    return [
-        {
-            "rule_name": b["key"],
-            "first_event": b["first_event"]["value_as_string"],
-            "last_event": b["last_event"]["value_as_string"],
-        }
-        for b in res["aggregations"]["by_rule"]["buckets"]
-    ]
 
 
 # ======================
@@ -205,7 +212,11 @@ def save_to_db(results, db: Session):
                 destination_port=item.get("destination_port"),
                 counts=item.get("count"),
                 first_seen_event=item["first_event"],
-                last_seen_event=item["last_event"]
+                last_seen_event=item["last_event"],
+                modul=item["module"],
+                sub_type=item["sub_type"],
+                tipe=item["tipe"]
+
             )
             db.add(record)
         db.commit()
