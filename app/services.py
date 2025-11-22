@@ -7,6 +7,7 @@ import os
 
 INDEX = os.getenv("ELASTIC_INDEX")
 INDEX_PANW = ".ds-logs-panw.panos-default-*"
+INDEX_SEARCH = "logs-*"
 
 def get_time_range_filter(timeframe: str):
     now = datetime.utcnow()
@@ -227,9 +228,73 @@ def save_to_db(results, db: Session):
 
 
 # ======================
-# CONTOH PENGGUNAAN
+# SEARCH KE ELASTICSEARCH
 # ======================
-# if __name__ == "__main__":
-#     timeframe = "last7days"  # bisa diubah
-#     data = get_threat_counts(timeframe)
-#     save_to_db(data)
+
+# ======================================================
+# FLATTEN JSON SEPERTI SUMMARY KIBANA
+# ======================================================
+def flatten_json(y, prefix=""):
+    out = {}
+    for key, value in y.items():
+        new_key = f"{prefix}{key}" if prefix == "" else f"{prefix}.{key}"
+        if isinstance(value, dict):
+            out.update(flatten_json(value, new_key))
+        else:
+            out[new_key] = value
+    return out
+
+
+# ======================================================
+# GET FIELD LIST (Mirip Kibana Discover)
+# ======================================================
+def get_field_list(index="logs-*"):
+    result = es.search(index=index, size=1)
+
+    if "hits" not in result or len(result["hits"]["hits"]) == 0:
+        return []
+
+    sample = result["hits"]["hits"][0]["_source"]
+    flat = flatten_json(sample)
+
+    return sorted(list(flat.keys()))
+
+
+# ======================================================
+# SEARCH DATA (Filter field/operator/value)
+# ======================================================
+def search_elastic(filters):
+    must_clauses = []
+
+    for f in filters:
+        if f.operator == "is":
+            must_clauses.append({"term": {f.field: f.value}})
+
+        elif f.operator == "is_not":
+            must_clauses.append({"bool": {"must_not": [{"term": {f.field: f.value}}]}})
+
+        elif f.operator == "contain":
+            must_clauses.append({"match_phrase": {f.field: f.value}})
+
+    query_body = {
+        "size": 200,
+        "query": {
+            "bool": {
+                "must": must_clauses
+            }
+        }
+    }
+
+    res = es.search(index="logs-*", body=query_body)
+    hits = res["hits"]["hits"]
+
+    formatted = []
+    for h in hits:
+        flat = flatten_json(h["_source"])
+        flat["@timestamp"] = h["_source"].get("@timestamp")
+        formatted.append(flat)
+
+    return {
+        "total": len(formatted),
+        "data": formatted
+    }

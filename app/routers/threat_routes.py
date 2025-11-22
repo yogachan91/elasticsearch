@@ -1,15 +1,28 @@
 from fastapi import APIRouter, Query, Depends
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import List
 from ..database import get_db
 from ..models import CountIP
 from ..services import (
     get_threat_counts,
     save_to_db,
+    get_field_list,
+    search_elastic
 )
 import requests
 import os
 
 router = APIRouter(prefix="/api/threats", tags=["Threat Analytics"])
+
+# ======================================================
+# MODEL INPUT REQUEST
+# ======================================================
+class FilterItem(BaseModel):
+    field: str
+    operator: str
+    value: str
+
 
 @router.get("/counts")
 # def threat_counts(timeframe: str = Query("yesterday")):
@@ -70,8 +83,7 @@ def transfer_countip(db: Session = Depends(get_db)):
             "first_seen_event": row.first_seen_event.isoformat() if row.first_seen_event else None,
             "last_seen_event": row.last_seen_event.isoformat() if row.last_seen_event else None,
             "modul": row.modul,
-            "sub_type": row.sub_type,
-            "tipe": row.tipe
+            "sub_type": row.sub_type
         })
 
     # 3) Kirim ke Supabase temanmu
@@ -126,4 +138,25 @@ def alter_supabase_column():
             "code": response.status_code,
             "detail": response.text
         }
+    
+
+    # ==============================================
+# 🔍 SEARCH ENDPOINT (destination.ip / source.ip)
+# ==============================================
+# ======================================================
+# GET ALL FIELDS (Mirip Kibana Discover)
+# ======================================================
+@router.get("/fields")
+async def api_fields():
+    fields = get_field_list()
+    return {"fields": fields}
+
+
+# ======================================================
+# SEARCH DATA
+# ======================================================
+@router.post("/search")
+async def api_search(filters: List[FilterItem]):
+    result = search_elastic(filters)
+    return result
 
