@@ -3,6 +3,8 @@ from app.database import Base
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from pydantic import BaseModel
+from typing import List, Optional
 
 def generate_id():
     return "-".join([uuid.uuid4().hex[:4] for _ in range(4)])
@@ -34,3 +36,12 @@ class CountIP(Base):
     modul = Column(String)
     sub_type = Column(String)
     tipe = Column(String)
+
+class FilterItem(BaseModel):
+    field: str
+    operator: str   # "is", "contains", "gte", "lte", etc
+    value: str
+
+class EventRequest(BaseModel):
+    timeframe: str 
+    filters: Optional[List[FilterItem]] = []
