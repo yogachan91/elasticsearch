@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends 
+from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List
@@ -8,9 +9,6 @@ from ..models import CountIP, EventRequest
 from ..services import (
     get_threat_counts,
     save_to_db,
-    get_field_list,
-    search_elastic,
-    SearchRequest,
     get_suricata_events,
     get_sophos_events,
     get_panw_events,
@@ -23,12 +21,19 @@ from ..services import (
 import requests
 import os
 import traceback
+import asyncio
+import json
+import jwt
+import httpx
 
 INDEX = os.getenv("ELASTIC_INDEX")
 INDEX_PANW = ".ds-logs-panw.panos-default-*"
 INDEX_SEARCH = "logs-*"
 
 router = APIRouter(prefix="/api/threats", tags=["Threat Analytics"])
+
+# URL backend utama untuk verifikasi token
+BACKEND_AUTH_VERIFY = os.getenv("AUTH_VERIFY_URL", "http://103.150.227.205:8080/api/auth/verify-token")
 
 # ======================================================
 # MODEL INPUT REQUEST
@@ -111,71 +116,6 @@ def transfer_countip(db: Session = Depends(get_db)):
         return {"status": "failed", "code": resp.status_code, "detail": resp.text}
     
 
-# ======================
-# ENDPOINT MENGUBAH TYPE KOLOM DATABASE USER LAIN
-# ======================
-
-@router.get("/alter-column")
-def alter_supabase_column():
-    """
-    Mengubah tipe kolom 'id' di tabel countip teman menjadi character varying (text)
-    """
-    rest_url = f"{SUPABASE_TARGET_URL}/rest/v1/rpc"
-    sql_query = """
-        ALTER TABLE public.countip 
-        ALTER COLUMN id TYPE character varying 
-        USING id::character varying;
-    """
-
-    # Supabase SQL API (gunakan endpoint PostgREST bawaan untuk RPC SQL)
-    sql_headers = {
-        "apikey": SUPABASE_TARGET_KEY,
-        "Authorization": f"Bearer {SUPABASE_TARGET_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    # Mengirim query SQL lewat Supabase REST API bawaan
-    payload = {
-        "query": sql_query
-    }
-
-    response = requests.post(
-        f"{SUPABASE_TARGET_URL}/rest/v1/rpc/sql",
-        json=payload,
-        headers=sql_headers
-    )
-
-    if response.status_code in [200, 201, 204]:
-        return {"status": "success", "message": "Kolom 'id' berhasil diubah menjadi character varying"}
-    else:
-        return {
-            "status": "failed",
-            "code": response.status_code,
-            "detail": response.text
-        }
-    
-
-    # ==============================================
-# 🔍 SEARCH ENDPOINT (destination.ip / source.ip)
-# ==============================================
-# ======================================================
-# GET ALL FIELDS (Mirip Kibana Discover)
-# ======================================================
-@router.get("/fields")
-async def api_fields():
-    fields = get_field_list()
-    return {"fields": fields}
-
-
-# ======================================================
-# SEARCH DATA
-# ======================================================
-@router.post("/search")
-async def api_search(request: SearchRequest):
-    result = search_elastic(request.filters, request.timeframe)
-    return result
-    
-
 @router.get("/events/filter")
 def get_filtered_events(body: EventRequest):
 
@@ -197,11 +137,31 @@ def get_filtered_events(body: EventRequest):
         if f.operator == "is":
             combined = [x for x in combined if str(x.get(field)) == value]
 
+        elif f.operator == "is not":
+            combined = [x for x in combined if str(x.get(field)) != value]
+
+        elif f.operator == "exists":
+            combined = [x for x in combined if str(x.get(field)) is not None]
+
         elif f.operator == "contains":
             combined = [x for x in combined if value.lower() in str(x.get(field, "")).lower()]
 
         elif f.operator == "starts_with":
             combined = [x for x in combined if str(x.get(field, "")).startswith(value)]
+
+        elif f.operator == ">":
+            try:
+                filter_value = float(value)
+                combined = [x for x in combined if float(x.get(field, "")) > filter_value]
+            except (ValueError, TypeError):
+                pass
+        
+        elif f.operator == "<":
+            try:
+                filter_value = float(value)
+                combined = [x for x in combined if float(x.get(field, "")) < filter_value]
+            except (ValueError, TypeError):
+                pass
 
     # Urutkan berdasarkan waktu
     combined_sorted = sorted(
@@ -252,11 +212,101 @@ def get_risk_summary(body: EventRequest):
     except Exception as e:
         print("🔥 ERROR:", e)
         print(traceback.format_exc())
-        raise
+        
+        
+# ============================================================
+# 🔐 HELPER: Verify Token ke Backend Utama
+# ============================================================
+async def verify_jwt_to_main_backend(token: str):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(
+                BACKEND_AUTH_VERIFY,
+                json={"token": token}
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception:
+            return {"valid": False}
 
 
+# ============================================================
+# 🔌 WEBSOCKET DENGAN SECURITY
+# ============================================================
+@router.websocket("/events/summary/ws")
+async def summary_websocket(ws: WebSocket):
+    # Accept WebSocket connection
+    await ws.accept()
 
+    # ============================================
+    # 🔐 Validate JWT from query parameters
+    # ============================================
+    token = ws.query_params.get("token")
+    if not token:
+        await ws.close(code=4001)
+        return
 
+    validation = await verify_jwt_to_main_backend(token)
+
+    if not validation.get("valid"):
+        await ws.send_text(json.dumps({"error": "Invalid or expired token"}))
+        await ws.close(code=4002)
+        return
+
+    # If valid → get user_id
+    user_id = validation.get("user_id")
+
+    print(f"WebSocket Connected by user_id={user_id}")
+
+    # ============================================
+    # 🔄 Main realtime loop
+    # ============================================
+    try:
+        while True:
+            # Terima request body dari frontend
+            message = await ws.receive_text()
+            body = json.loads(message)
+
+            timeframe = body.get("timeframe", "last30days")
+            filters = body.get("filters", [])
+
+            # Ambil data dari Elasticsearch
+            suricata = get_suricata_events(es, INDEX, timeframe) or []
+            sophos = get_sophos_events(es, INDEX, timeframe) or []
+            panw = get_panw_events(es, INDEX_PANW, timeframe) or []
+
+            combined = suricata + sophos + panw
+
+            # Build summary
+            summary = calculate_risk_summary(combined)
+            global_stats = calculate_global_stats(combined, timeframe)
+            event_type_stats = build_event_type_stats(suricata, sophos, panw, timeframe)
+            mitre_stats = calculate_mitre_stats(combined)
+
+            response = {
+                "timeframe": timeframe,
+                "summary": summary,
+                "global_stats": global_stats,
+                "event_type_stats": event_type_stats,
+                "mitre_stats": mitre_stats,
+                "count": len(summary)
+            }
+
+            # Kirim hasil ke frontend (real-time)
+            await ws.send_text(json.dumps(response))
+
+            # Jika ingin ada delay supaya tidak spam
+            await asyncio.sleep(0.5)
+
+    except WebSocketDisconnect:
+        print("Client disconnected")
+    except Exception as e:
+        print("WebSocket Error:", e)
+        try:
+            await ws.send_text(json.dumps({"error": str(e)}))
+        except:
+            pass
+        await ws.close()
 
 
 
