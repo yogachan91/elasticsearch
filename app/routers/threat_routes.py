@@ -238,22 +238,22 @@ async def summary_websocket(ws: WebSocket):
     # ============================================
     # 🔐 Validate JWT from query parameters
     # ============================================
-    # token = ws.query_params.get("token")
-    # if not token:
-    #     await ws.close(code=4001)
-    #     return
+    token = ws.query_params.get("token")
+    if not token:
+        await ws.close(code=4001)
+        return
 
-    # validation = await verify_jwt_to_main_backend(token)
+    validation = await verify_jwt_to_main_backend(token)
 
-    # if not validation.get("valid"):
-    #     await ws.send_text(json.dumps({"error": "Invalid or expired token"}))
-    #     await ws.close(code=4002)
-    #     return
+    if not validation.get("valid"):
+        await ws.send_text(json.dumps({"error": "Invalid or expired token"}))
+        await ws.close(code=4002)
+        return
 
     # If valid → get user_id
-    # user_id = validation.get("user_id")
+    user_id = validation.get("user_id")
 
-    # print(f"WebSocket Connected by user_id={user_id}")
+    print(f"WebSocket Connected by user_id={user_id}")
 
     # ============================================
     # 🔄 Main realtime loop
