@@ -113,7 +113,7 @@ class EventRequest(BaseModel):
     #     return {"status": "failed", "code": resp.status_code, "detail": resp.text}
     
 
-@router.get("/events/filter")
+@router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
 
     timeframe = body.timeframe

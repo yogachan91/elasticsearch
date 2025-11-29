@@ -587,11 +587,10 @@ def build_timeline(events, timeframe):
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
         if timeframe in ["today", "8hours", "last8hours", "24hours", "last24hours"]:
-            key = dt.strftime("%H:00")   # timeline per jam
+            key = dt.strftime("%Y-%m-%d %H:00")   # tampilkan tanggal + jam
         else:
-            # timeline per hari dari range timeframe
-            day = dt.strftime("%Y-%m-%d")
-            key = day
+            # timeline per hari + jam (kalau mau jam juga ditampilkan)
+            key = dt.strftime("%Y-%m-%d %H:00")
 
         timeline[key] += 1
 
