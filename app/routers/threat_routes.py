@@ -11,7 +11,8 @@ from ..services import (
     calculate_risk_summary,
     calculate_global_stats,
     build_event_type_stats,
-    calculate_mitre_stats
+    calculate_mitre_stats,
+    calculate_global_attack
 )
 import requests
 import os
@@ -40,6 +41,7 @@ class FilterItem(BaseModel):
 class EventRequest(BaseModel):
     timeframe: str 
     filters: Optional[List[FilterItem]] = []
+    search_query: Optional[str] = None
 
 # @router.get("/counts")
 # def threat_counts(timeframe: str = Query("yesterday")):
@@ -118,6 +120,7 @@ def get_filtered_events(body: EventRequest):
 
     timeframe = body.timeframe
     user_filters = build_dynamic_filters(body.filters)
+    search_query = body.search_query.lower() if body.search_query else None
 
     suricata = get_suricata_events(es, INDEX, timeframe)
     sophos = get_sophos_events(es, INDEX, timeframe)
@@ -160,6 +163,34 @@ def get_filtered_events(body: EventRequest):
             except (ValueError, TypeError):
                 pass
 
+        
+        # ----------------------------------------------------
+    # 🆕 PEMBARUAN KRITIS: TERAPKAN LOGIKA SEARCH BAR (Universal Search)
+    # ----------------------------------------------------
+    
+    if search_query:
+        # Tentukan field mana yang akan dicari (Universal Search)
+        # Tambahkan field lain jika diperlukan (misalnya 'port', 'protocol', 'application')
+        searchable_fields = [
+            "source_ip", 
+            "destination_ip", 
+            "country",        # Asumsi ini adalah source_country
+            "event_type",
+            "description",
+            "severity",
+            "mitre_stages"
+        ]
+
+        # Saring combined list: hanya simpan event yang cocok di SETIDAKNYA SATU field
+        combined = [
+            event for event in combined 
+            if any(
+                # Cek apakah search_query ada di field tersebut (case-insensitive)
+                search_query in str(event.get(field, "")).lower()
+                for field in searchable_fields
+            )
+        ]
+
     # Urutkan berdasarkan waktu
     combined_sorted = sorted(
         combined,
@@ -170,6 +201,7 @@ def get_filtered_events(body: EventRequest):
     return {
         "timeframe": timeframe,
         "filters_applied": body.filters,
+        "search_query_applied": body.search_query, # Opsional: untuk debugging
         "count": len(combined_sorted),
         "events": combined_sorted
     }
@@ -191,12 +223,14 @@ def get_risk_summary(body: EventRequest):
 
         # 🔥 HITUNG MITRE
         mitre_stats = calculate_mitre_stats(combined)
+        global_attack = calculate_global_attack(combined)
 
         return {
             "timeframe": timeframe,
             "count": len(summary),
             "summary": summary,
             "mitre": mitre_stats,
+            "global_attack": global_attack,
             "events": [
                 {
                     "total": global_stats["total"],

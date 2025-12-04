@@ -4,7 +4,7 @@ from .elastic_client import es
 # from .models import CountIP
 # from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from collections import defaultdict
 from datetime import datetime   
 from dateutil import parser
@@ -43,6 +43,8 @@ def get_time_range_filter(timeframe: str):
         start = now - timedelta(days=7)
     elif timeframe == "last30days":
         start = now - timedelta(days=30)
+    elif timeframe == "last60days":
+        start = now - timedelta(days=60)
     elif timeframe == "last90days":
         start = now - timedelta(days=90)
     else:
@@ -66,6 +68,8 @@ def get_time_range_for_stats(timeframe: str):
         start = now - timedelta(days=7)
     elif timeframe == "last30days":
         start = now - timedelta(days=30)
+    elif timeframe == "last60days":
+        start = now - timedelta(days=60)
     elif timeframe == "last90days":
         start = now - timedelta(days=90)
     else:
@@ -86,7 +90,7 @@ def get_suricata_events(es, INDEX, timeframe):
         },
         "aggs": {
             "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 200},
+                "terms": {"field": "rule.name.keyword", "size": 500},
                 "aggs": {
                     "sample_event": {
                         "top_hits": {
@@ -103,6 +107,10 @@ def get_suricata_events(es, INDEX, timeframe):
                                 "mitre.stages",
                                 "log.id.uid",
                                 "network.transport",
+                                "source.geo.location.lon",
+                                "source.geo.location.lat",
+                                "destination.geo.location.lon",
+                                "destination.geo.location.lat",
                                 "@timestamp"
                             ]
                         }
@@ -138,6 +146,10 @@ def get_suricata_events(es, INDEX, timeframe):
             "count": bucket["doc_count"],
             "first_event": bucket["first_event"].get("value_as_string"),
             "last_event": bucket["last_event"].get("value_as_string"),
+            "source_longitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
+            "source_latitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
+            "destination_longitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
+            "destination_latitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lat")
         })
 
     return results
@@ -191,6 +203,10 @@ def get_sophos_events(es, INDEX, timeframe):
             "count": 1,
             "first_event": src.get("@timestamp"),
             "last_event": src.get("@timestamp"),
+            "source_longitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
+            "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
+            "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
+            "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat")
         })
 
     return results
@@ -227,19 +243,23 @@ def get_panw_events(es, INDEX_PANW, timeframe):
                 or src.get("destination", {}).get("geo", {}).get("country_name"),
             "event_type": "panw",
             "sub_type": panw.get("sub_type"),
-            "severity": panw.get("severity"),
+            "severity": src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"),
             "timestamp": src.get("@timestamp"),
             "mitre_stages": src.get("mitre", {}).get("stages"),
             "event_id": panw.get("seqno"),
             "application": panw.get("app"),
-            "description": panw.get("threat_name") or panw.get("name"),
+            "description": panw.get("threat", {}).get("name"),
             "protocol": src.get("network", {}).get("transport"),
             "destination_country": src.get("destination", {}).get("geo", {}).get("country_name")
                 or src.get("source", {}).get("geo", {}).get("country_name"),
             "port": src.get("destination", {}).get("port") or panw.get("dest_port"),
             "count": 1,
             "first_event": src.get("@timestamp"),
-            "last_event": src.get("@timestamp")
+            "last_event": src.get("@timestamp"),
+            "source_longitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
+            "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
+            "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
+            "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat")
         })
 
     return results
@@ -575,6 +595,7 @@ def calculate_global_stats(events, timeframe):
         "total": total,
         "seconds": per_second
     }
+    
 
 def build_timeline(events, timeframe):
     timeline = defaultdict(int)
@@ -618,14 +639,123 @@ def build_event_type_stats(suricata, sophos, panw, timeframe):
         }
     ]
 
+def calculate_global_attack(events):
+    """
+    Mengambil 5 event terbaru yang memiliki severity 'Notice' atau 'Informational'.
+    """
+    
+    events_with_timestamp = []
+
+    # 1. Filtering dan Ekstraksi Data
+    for event in events:
+        timestamp = event.get("timestamp")
+        severity = event.get("severity", "").lower()
+        
+        # A. Filter Severity (Hanya Informational atau Notice)
+        # Gunakan .lower() karena severity event bisa bervariasi casing-nya.
+        if severity not in ["informational", "notice"]:
+            continue # Melewati event jika severity-nya bukan yang dicari
+            
+        # B. Hanya proses event yang memiliki timestamp untuk sorting
+        if timestamp is not None:
+            # Ekstraksi semua data yang dibutuhkan
+            events_with_timestamp.append({
+                "destination_ip": event.get("destination_ip", ""),
+                "source_ip": event.get("source_ip", ""),
+                "country": event.get("country", ""), 
+                "event_type": event.get("event_type", ""),
+                "destination_country": event.get("destination_country", ""),
+                "severity": event.get("severity", ""), # Simpan severity aslinya
+                "timestamp": timestamp, # Digunakan untuk sorting
+                "source_longitude": event.get("source_longitude"),
+                "source_latitude": event.get("source_latitude"),
+                "destination_longitude": event.get("destination_longitude"),
+                "destination_latitude": event.get("destination_latitude"),
+            })
+
+    # 2. Sorting (Ambil 5 data terbaru)
+    try:
+        # Sortir berdasarkan 'timestamp' secara descending (terbaru)
+        sorted_events = sorted(
+            events_with_timestamp, 
+            key=lambda x: x["timestamp"], 
+            reverse=True
+        )
+    except (TypeError, KeyError):
+        # Fallback jika timestamp formatnya bermasalah
+        sorted_events = events_with_timestamp
+        
+    # 3. Ambil 5 data teratas
+    return sorted_events[:5]
+
 # ----------------------------
 # 🔥 NEW FUNCTION – MITRE STATS
 # ----------------------------
 def calculate_mitre_stats(events):
-    total_events = len(events)
+    # total_events = len(events)
 
+    # mitre_count = defaultdict(int)
+
+    # for ev in events:
+    #     stage = ev.get("mitre_stages")
+
+    #     # skip null/None and "Unmapped"
+    #     if not stage:
+    #         continue
+    #     if stage.lower() == "unmapped":
+    #         continue
+
+    #     mitre_count[stage] += 1
+
+    # result = []
+    # for stage, count in mitre_count.items():
+    #     persen = (count / total_events * 100) if total_events > 0 else 0
+    #     result.append({
+    #         "stages": stage,
+    #         "total_all": total_events,
+    #         "total_data": count,
+    #         "persen": f"{persen:.2f}"
+    #     })
+
+    # return result
+
+    """
+    Menghitung statistik MITRE ATT&CK untuk 5 stage yang ditentukan secara eksplisit,
+    menambahkan field severity dan description untuk setiap stage.
+    Stage yang tidak memiliki data tetap dimunculkan dengan total_data 0.
+    """
+    
+    # 1. Definisikan 5 stage yang wajib muncul dan mapping detailnya (Severity & Description)
+    STAGE_DETAILS_MAPPING = {
+        "Initial Attempts": {
+            "severity": "low",
+            "description": "Reconnaissance, Initial Access"
+        }, 
+        "Persistent Foothold": {
+            "severity": "medium",
+            "description": "Execution, Persistence, Privilege Escalation"
+        }, 
+        "Exploration": {
+            "severity": "medium",
+            "description": "Defense Evasion, Credential Access, Discovery"
+        }, 
+        "Propagation": {
+            "severity": "high",
+            "description": "Lateral Movement"
+        }, 
+        "Exfiltration": {
+            "severity": "critical",
+            "description": "Collection, Exfiltration, Impact"
+        }
+    }
+    
+    # Ambil list nama stage yang wajib muncul dari keys mapping
+    REQUIRED_STAGES = list(STAGE_DETAILS_MAPPING.keys())
+    
+    total_events = len(events)
     mitre_count = defaultdict(int)
 
+    # 2. Hitung frekuensi event untuk stage yang ADA
     for ev in events:
         stage = ev.get("mitre_stages")
 
@@ -634,17 +764,31 @@ def calculate_mitre_stats(events):
             continue
         if stage.lower() == "unmapped":
             continue
-
-        mitre_count[stage] += 1
+            
+        # Tambahkan ke hitungan hanya jika stage tersebut termasuk dalam 5 yang dibutuhkan
+        if stage in REQUIRED_STAGES:
+            mitre_count[stage] += 1
 
     result = []
-    for stage, count in mitre_count.items():
-        persen = (count / total_events * 100) if total_events > 0 else 0
+    
+    # 3. Iterasi melalui 5 stage yang WAJIB dimunculkan
+    for stage in REQUIRED_STAGES:
+        # Ambil hitungan dari mitre_count, default ke 0 jika tidak ditemukan
+        count = mitre_count.get(stage, 0)
+        
+        # Hitung persentase
+        persen_value = (count / total_events * 100) if total_events > 0 else 0
+        
+        # Dapatkan detail (severity dan description) dari mapping
+        stage_detail = STAGE_DETAILS_MAPPING[stage]
+        
         result.append({
             "stages": stage,
             "total_all": total_events,
             "total_data": count,
-            "persen": f"{persen:.2f}"
+            "persen": f"{persen_value:.2f}",
+            "severity": stage_detail["severity"],          # <-- AMBIL DARI DETAIL
+            "description": stage_detail["description"]      # <-- FIELD BARU DITAMBAHKAN DI SINI
         })
 
     return result
