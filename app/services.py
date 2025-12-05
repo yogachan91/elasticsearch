@@ -669,7 +669,7 @@ def calculate_global_attack(events):
         destination_ip = event.get("destination_ip", "") # Ambil destination_ip
         
         # A. Filter Severity (Sesuai kode asli, mencari event yang severity-nya BUKAN critical atau high)
-        if severity in ["critical", "high"]:
+        if severity not in ["Critical", "High"]:
             continue # Lewati jika severity adalah Critical atau High
             
         # ----------------------------------------------------------------------
