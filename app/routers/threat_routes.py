@@ -129,42 +129,73 @@ def get_filtered_events(body: EventRequest):
     # gabungkan semua data
     combined = suricata + sophos + panw
 
-    # Apply filter manual di Python (post-filter)
+    # --- BAGIAN YANG DIUBAH: MENERAPKAN LOGIKA OR UNTUK FILTER "is" ---
+    
+    # 1. Pisahkan filter: kumpulkan semua kriteria 'is' dan sisa filter lainnya
+    is_filters_by_field = {}
+    other_filters = []
+
     for f in body.filters:
-        field = f.field
-        value = f.value
-
         if f.operator == "is":
-            combined = [x for x in combined if str(x.get(field)) == value]
+            field = f.field
+            # Konversi nilai ke lowercase untuk pencocokan case-insensitive
+            value = str(f.value).lower() 
+            
+            if field not in is_filters_by_field:
+                is_filters_by_field[field] = set() # Gunakan set untuk menghindari duplikasi nilai
+            is_filters_by_field[field].add(value)
+        else:
+            other_filters.append(f)
 
-        elif f.operator == "is not":
-            combined = [x for x in combined if str(x.get(field)) != value]
+    # 2. Terapkan Logika OR untuk filter 'is' yang terkumpul
+    # Setiap field yang difilter 'is' harus cocok dengan SALAH SATU nilainya.
+    for field, allowed_values in is_filters_by_field.items():
+        # allowed_values adalah set dari nilai-nilai yang diizinkan (misalnya {"panw", "suricata"})
+        combined = [
+            x for x in combined 
+            if str(x.get(field, "")).lower() in allowed_values
+        ]
+
+    # 3. Terapkan filter lainnya secara berurutan (Logika AND)
+    # Ini sama dengan logika AND sequential yang Anda gunakan sebelumnya
+    for f in other_filters:
+        field = f.field
+        value = f.value # Nilai tetap (tidak di-lower() agar operator numerik tetap berfungsi)
+
+        if f.operator == "is_not":
+            # Perhatian: Untuk konsistensi, sebaiknya gunakan lower() juga di sini
+            combined = [x for x in combined if str(x.get(field, "")).lower() != str(value).lower()]
 
         elif f.operator == "exists":
-            combined = [x for x in combined if str(x.get(field)) is not None]
+            # Cek apakah field ada dan nilainya bukan None
+            combined = [x for x in combined if x.get(field) is not None]
 
         elif f.operator == "contains":
             combined = [x for x in combined if value.lower() in str(x.get(field, "")).lower()]
 
         elif f.operator == "starts_with":
-            combined = [x for x in combined if str(x.get(field, "")).startswith(value)]
+            combined = [x for x in combined if str(x.get(field, "")).lower().startswith(value.lower())]
 
         elif f.operator == ">":
             try:
                 filter_value = float(value)
-                combined = [x for x in combined if float(x.get(field, "")) > filter_value]
+                # Pastikan nilai field dapat dikonversi ke float, jika tidak, abaikan
+                combined = [x for x in combined if x.get(field) is not None and float(x.get(field)) > filter_value]
             except (ValueError, TypeError):
+                # Jika nilai field bukan numerik, abaikan
                 pass
         
         elif f.operator == "<":
             try:
                 filter_value = float(value)
-                combined = [x for x in combined if float(x.get(field, "")) < filter_value]
+                combined = [x for x in combined if x.get(field) is not None and float(x.get(field)) < filter_value]
             except (ValueError, TypeError):
                 pass
-
-        
-        # ----------------------------------------------------
+    
+    # --- END OF FILTER LOGIC MODIFICATION ---
+    
+    
+    # ----------------------------------------------------
     # 🆕 PEMBARUAN KRITIS: TERAPKAN LOGIKA SEARCH BAR (Universal Search)
     # ----------------------------------------------------
     
@@ -174,7 +205,7 @@ def get_filtered_events(body: EventRequest):
         searchable_fields = [
             "source_ip", 
             "destination_ip", 
-            "country",        # Asumsi ini adalah source_country
+            "country",      # Asumsi ini adalah source_country
             "event_type",
             "description",
             "severity",

@@ -587,13 +587,28 @@ def calculate_global_stats(events, timeframe):
     start, end = get_time_range_for_stats(timeframe)
 
     total = len(events)
-    seconds = int((end - start).total_seconds())
-
-    per_second = round(total / seconds, 2) if seconds > 0 else 0
+    
+    # ----------------------------------------------------
+    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND DIMULAI DI SINI
+    # ----------------------------------------------------
+    
+    if timeframe == "today":
+        # Jika timeframe adalah "today", bagi total dengan 900
+        per_second = round(total / 900, 2)
+    else:
+        # Jika timeframe adalah selain "today", nilai per_second adalah 0
+        per_second = 0 
+        
+    # ----------------------------------------------------
+    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND SELESAI DI SINI
+    # ----------------------------------------------------
 
     return {
         "total": total,
-        "seconds": per_second
+        # Ubah key "seconds" menjadi sesuatu yang lebih deskriptif 
+        # karena nilainya tidak lagi mewakili event/second yang sebenarnya.
+        # Misalnya, kita tetap menggunakan "per_second"
+        "seconds": per_second 
     }
     
 
@@ -650,18 +665,36 @@ def calculate_global_attack(events):
     for event in events:
         timestamp = event.get("timestamp")
         severity = event.get("severity", "").lower()
+        source_ip = event.get("source_ip", "") # Ambil source_ip
+        destination_ip = event.get("destination_ip", "") # Ambil destination_ip
         
-        # A. Filter Severity (Hanya Informational atau Notice)
-        # Gunakan .lower() karena severity event bisa bervariasi casing-nya.
-        if severity not in ["informational", "notice"]:
-            continue # Melewati event jika severity-nya bukan yang dicari
+        # A. Filter Severity (Sesuai kode asli, mencari event yang severity-nya BUKAN critical atau high)
+        if severity in ["critical", "high"]:
+            continue # Lewati jika severity adalah Critical atau High
             
-        # B. Hanya proses event yang memiliki timestamp untuk sorting
+        # ----------------------------------------------------------------------
+        # B. 🆕 FILTER IP (Mengecualikan traffic internal 192.168.x.x ke 192.168.x.x)
+        # ----------------------------------------------------------------------
+        
+        # Cek apakah Source IP dimulai dengan '192.168.'
+        is_source_internal = source_ip.startswith("192.168.")
+        
+        # Cek apakah Destination IP dimulai dengan '192.168.'
+        is_destination_internal = destination_ip.startswith("192.168.")
+        
+        # Traffic internal adalah jika KEDUA source DAN destination adalah 192.168.
+        is_internal_traffic = is_source_internal and is_destination_internal
+        
+        if is_internal_traffic:
+            continue # Lewati (skip) event ini karena merupakan traffic internal
+        
+        # ----------------------------------------------------------------------
+        # C. Hanya proses event yang memiliki timestamp untuk sorting
         if timestamp is not None:
             # Ekstraksi semua data yang dibutuhkan
             events_with_timestamp.append({
-                "destination_ip": event.get("destination_ip", ""),
-                "source_ip": event.get("source_ip", ""),
+                "destination_ip": destination_ip,
+                "source_ip": source_ip,
                 "country": event.get("country", ""), 
                 "event_type": event.get("event_type", ""),
                 "destination_country": event.get("destination_country", ""),
