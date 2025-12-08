@@ -817,7 +817,7 @@ def calculate_global_attack(events):
         destination_ip = event.get("destination_ip", "") # Ambil destination_ip
         
         # A. Filter Severity (Sesuai kode asli, mencari event yang severity-nya BUKAN critical atau high)
-        if severity not in ["Critical", "High"]:
+        if severity not in ["informational", "notice"]:
             continue # Lewati jika severity adalah Critical atau High
             
         # ----------------------------------------------------------------------
@@ -825,16 +825,17 @@ def calculate_global_attack(events):
         # ----------------------------------------------------------------------
         
         # Cek apakah Source IP dimulai dengan '192.168.'
-        is_source_internal = source_ip.startswith("192.168.")
+        # is_source_internal = source_ip.startswith("192.168.")
         
         # Cek apakah Destination IP dimulai dengan '192.168.'
-        is_destination_internal = destination_ip.startswith("192.168.")
+        # is_destination_internal = destination_ip.startswith("192.168.")
         
         # Traffic internal adalah jika KEDUA source DAN destination adalah 192.168.
-        is_internal_traffic = is_source_internal and is_destination_internal
+        # is_internal_traffic = is_source_internal and is_destination_internal
         
-        if is_internal_traffic:
-            continue # Lewati (skip) event ini karena merupakan traffic internal
+        # if is_internal_traffic:
+        #     continue 
+        # Lewati (skip) event ini karena merupakan traffic internal
         
         # ----------------------------------------------------------------------
         # C. Hanya proses event yang memiliki timestamp untuk sorting
