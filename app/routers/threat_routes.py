@@ -12,7 +12,8 @@ from ..services import (
     calculate_global_stats,
     build_event_type_stats,
     calculate_mitre_stats,
-    calculate_global_attack
+    calculate_global_attack,
+    build_event_type_ingest
 )
 import requests
 import os
@@ -251,6 +252,7 @@ def get_risk_summary(body: EventRequest):
         summary = calculate_risk_summary(combined)
         global_stats = calculate_global_stats(combined, timeframe)
         event_type_stats = build_event_type_stats(suricata, sophos, panw, timeframe)
+        event_type_ingest = build_event_type_ingest(suricata, sophos, panw)
 
         # 🔥 HITUNG MITRE
         mitre_stats = calculate_mitre_stats(combined)
