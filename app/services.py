@@ -33,6 +33,8 @@ def get_time_range_filter(timeframe: str):
         start = datetime(now.year, now.month, now.day)
     elif timeframe == "yesterday":
         start = now - timedelta(days=1)
+    elif timeframe == "1hours" or timeframe == "last1hours":
+        start = now - timedelta(hours=1)
     elif timeframe == "8hours" or timeframe == "last8hours":
         start = now - timedelta(hours=8)
     elif timeframe == "24hours" or timeframe == "last24hours":
@@ -58,6 +60,8 @@ def get_time_range_for_stats(timeframe: str):
         start = datetime(now.year, now.month, now.day)
     elif timeframe == "yesterday":
         start = now - timedelta(days=1)
+    elif timeframe == "1hours" or timeframe == "last1hours":
+        start = now - timedelta(hours=1)
     elif timeframe in ["8hours", "last8hours"]:
         start = now - timedelta(hours=8)
     elif timeframe in ["24hours", "last24hours"]:
@@ -787,18 +791,15 @@ def build_event_type_ingest(suricata, sophos, panw):
     return [
         {
             "event_type": "suricata",
-            "total": len(suricata),
-            "timeline": build_timeline(suricata, timeframe)
+            "total": len(get_suricata_events(es, INDEX, timeframe))
         },
         {
             "event_type": "sophos",
-            "total": len(sophos),
-            "timeline": build_timeline(sophos, timeframe)
+            "total": len(get_sophos_events(es, INDEX, timeframe))
         },
         {
             "event_type": "panw",
-            "total": len(panw),
-            "timeline": build_timeline(panw, timeframe)
+            "total": len(get_panw_events(es, INDEX, timeframe))
         }
     ]
 

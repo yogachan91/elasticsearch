@@ -270,6 +270,13 @@ def get_risk_summary(body: EventRequest):
                     "seconds": global_stats["seconds"],
                     "list": event_type_stats
                 }
+            ],
+            "events_ingest": [
+                {
+                    "total": global_stats["total"],
+                    "seconds": global_stats["seconds"],
+                    "list": event_type_ingest
+                }
             ]
         }
 
