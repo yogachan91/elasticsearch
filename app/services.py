@@ -6,8 +6,9 @@ from .elastic_client import es
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from collections import defaultdict
-from datetime import datetime   
+from datetime import datetime, timedelta   
 from dateutil import parser
+from zoneinfo import ZoneInfo
 import os
 import math
 import re
@@ -27,10 +28,14 @@ class SearchRequest(BaseModel):
 
 
 def get_time_range_filter(timeframe: str):
-    now = datetime.utcnow()
+    jakarta_tz = ZoneInfo("Asia/Jakarta")
+    now = datetime.now(tz=jakarta_tz)
+
     if timeframe == "today":
         # mulai dari jam 00:00 UTC
         start = datetime(now.year, now.month, now.day)
+    elif timeframe == "last1minutes" or timeframe == "1minutes":
+        start = now - timedelta(seconds=5)
     elif timeframe == "yesterday":
         start = now - timedelta(days=1)
     elif timeframe == "1hours" or timeframe == "last1hours":
@@ -54,10 +59,13 @@ def get_time_range_filter(timeframe: str):
     return {"range": {"@timestamp": {"gte": start.isoformat(), "lte": now.isoformat()}}}
 
 def get_time_range_for_stats(timeframe: str):
-    now = datetime.utcnow()
+    jakarta_tz = ZoneInfo("Asia/Jakarta")
+    now = datetime.now(tz=jakarta_tz)
 
     if timeframe == "today":
         start = datetime(now.year, now.month, now.day)
+    elif timeframe == "last1seconds" or timeframe == "1seconds":
+        start = now - timedelta(seconds=5)
     elif timeframe == "yesterday":
         start = now - timedelta(days=1)
     elif timeframe == "1hours" or timeframe == "last1hours":
@@ -598,7 +606,15 @@ def calculate_global_stats(events, timeframe):
     
     if timeframe == "today":
         # Jika timeframe adalah "today", bagi total dengan 900
-        per_second = round(total / 900, 2)
+        # per_second = round(total / 900, 2)
+        timeframe2 = "last1minutes"
+
+        suricata2 = get_suricata_events(es, INDEX, timeframe2) or []
+        sophos2 = get_sophos_events(es, INDEX, timeframe2) or []
+        panw2 = get_panw_events(es, INDEX_PANW, timeframe2) or []
+
+        combined2 = suricata2 + sophos2 + panw2
+        per_second = len(combined2)
     else:
         # Jika timeframe adalah selain "today", nilai per_second adalah 0
         per_second = 0 
@@ -653,7 +669,8 @@ def safe_parse_timestamp(ts):
 
 def build_timeline(events: list, timeframe: str) -> list:
     # Mengambil waktu saat ini (UTC disarankan untuk konsistensi)
-    now = datetime.now(timezone.utc)
+    jakarta_tz = ZoneInfo("Asia/Jakarta")
+    now = datetime.now(tz=jakarta_tz)
     
     # 1. Tentukan Granularitas, Format Output, dan Jangkauan Waktu
     
@@ -786,90 +803,97 @@ def build_event_type_stats(suricata, sophos, panw, timeframe):
         }
     ]
 
-def build_event_type_ingest(suricata, sophos, panw):
-    timeframe = "last1hours"
+def build_event_type_ingest(suricata, sophos, panw, timeframe):
     return [
         {
             "event_type": "suricata",
-            "total": len(get_suricata_events(es, INDEX, timeframe))
+            "total": len(suricata)
         },
         {
             "event_type": "sophos",
-            "total": len(get_sophos_events(es, INDEX, timeframe))
+            "total": len(sophos)
         },
         {
             "event_type": "panw",
-            "total": len(get_panw_events(es, INDEX, timeframe))
+            "total": len(panw)
         }
     ]
 
 def calculate_global_attack(events):
     """
-    Mengambil 5 event terbaru yang memiliki severity 'Notice' atau 'Informational'.
+    Mengambil 5 event terbaru dengan severity 'Critical' atau 'High',
+    mengecualikan traffic internal dan data dengan field penting bernilai null.
     """
-    
+
     events_with_timestamp = []
 
-    # 1. Filtering dan Ekstraksi Data
     for event in events:
         timestamp = event.get("timestamp")
         severity = event.get("severity", "").lower()
-        source_ip = event.get("source_ip", "") # Ambil source_ip
-        destination_ip = event.get("destination_ip", "") # Ambil destination_ip
-        
-        # A. Filter Severity (Sesuai kode asli, mencari event yang severity-nya BUKAN critical atau high)
-        if severity not in ["informational", "notice"]:
-            continue # Lewati jika severity adalah Critical atau High
-            
+        source_ip = event.get("source_ip", "")
+        destination_ip = event.get("destination_ip", "")
+
+        # A. Filter Severity (Hanya Critical & High)
+        if severity not in ["critical", "high"]:
+            continue
+
         # ----------------------------------------------------------------------
-        # B. 🆕 FILTER IP (Mengecualikan traffic internal 192.168.x.x ke 192.168.x.x)
+        # B. Filter Traffic Internal (192.168.x.x -> 192.168.x.x)
         # ----------------------------------------------------------------------
-        
-        # Cek apakah Source IP dimulai dengan '192.168.'
-        # is_source_internal = source_ip.startswith("192.168.")
-        
-        # Cek apakah Destination IP dimulai dengan '192.168.'
-        # is_destination_internal = destination_ip.startswith("192.168.")
-        
-        # Traffic internal adalah jika KEDUA source DAN destination adalah 192.168.
-        # is_internal_traffic = is_source_internal and is_destination_internal
-        
-        # if is_internal_traffic:
-        #     continue 
-        # Lewati (skip) event ini karena merupakan traffic internal
-        
+        is_source_internal = source_ip.startswith("192.168.")
+        is_destination_internal = destination_ip.startswith("192.168.")
+
+        if is_source_internal and is_destination_internal:
+            continue
+
         # ----------------------------------------------------------------------
-        # C. Hanya proses event yang memiliki timestamp untuk sorting
+        # C. Filter Field Wajib (TIDAK BOLEH NULL / None / Kosong)
+        # ----------------------------------------------------------------------
+        required_fields = [
+            event.get("country"),
+            event.get("destination_country"),
+            event.get("source_longitude"),
+            event.get("source_latitude"),
+            event.get("destination_longitude"),
+            event.get("destination_latitude"),
+        ]
+
+        # Jika salah satu field None atau kosong → skip
+        if any(field is None for field in required_fields):
+            continue
+
+        # ----------------------------------------------------------------------
+        # D. Hanya proses event yang memiliki timestamp
         if timestamp is not None:
-            # Ekstraksi semua data yang dibutuhkan
             events_with_timestamp.append({
                 "destination_ip": destination_ip,
                 "source_ip": source_ip,
-                "country": event.get("country", ""), 
+                "country": event.get("country"),
+                "destination_country": event.get("destination_country"),
                 "event_type": event.get("event_type", ""),
-                "destination_country": event.get("destination_country", ""),
-                "severity": event.get("severity", ""), # Simpan severity aslinya
-                "timestamp": timestamp, # Digunakan untuk sorting
+                "severity": event.get("severity"),
+                "timestamp": timestamp,
                 "source_longitude": event.get("source_longitude"),
                 "source_latitude": event.get("source_latitude"),
                 "destination_longitude": event.get("destination_longitude"),
                 "destination_latitude": event.get("destination_latitude"),
             })
 
-    # 2. Sorting (Ambil 5 data terbaru)
+    # ----------------------------------------------------------------------
+    # 2. Sorting berdasarkan timestamp (terbaru)
     try:
-        # Sortir berdasarkan 'timestamp' secara descending (terbaru)
         sorted_events = sorted(
-            events_with_timestamp, 
-            key=lambda x: x["timestamp"], 
+            events_with_timestamp,
+            key=lambda x: x["timestamp"],
             reverse=True
         )
     except (TypeError, KeyError):
-        # Fallback jika timestamp formatnya bermasalah
         sorted_events = events_with_timestamp
-        
+
+    # ----------------------------------------------------------------------
     # 3. Ambil 5 data teratas
     return sorted_events[:5]
+
 
 # ----------------------------
 # 🔥 NEW FUNCTION – MITRE STATS
