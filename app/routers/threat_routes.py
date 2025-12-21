@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Any
 from ..elastic_client import es
 from ..services import (
     get_suricata_events,
@@ -40,7 +40,8 @@ class FilterItem(BaseModel):
     operator: str
     value: str
 class EventRequest(BaseModel):
-    timeframe: str 
+    timeframe: str
+    operator_logic: Optional[str] = "AND" 
     filters: Optional[List[FilterItem]] = []
     search_query: Optional[str] = None
 
@@ -114,126 +115,89 @@ class EventRequest(BaseModel):
     #     return {"status": "success", "inserted": len(local_rows)}
     # else:
     #     return {"status": "failed", "code": resp.status_code, "detail": resp.text}
+
+def evaluate_condition(event: dict, f: FilterItem) -> bool:
+    """Helper untuk mengecek apakah satu event memenuhi satu kriteria filter"""
+    field = f.field
+    val_filter = str(f.value).lower()
+    val_event = str(event.get(field, "")).lower()
+
+    if f.operator == "is":
+        return val_event == val_filter
     
+    elif f.operator == "is_not":
+        return val_event != val_filter
+    
+    elif f.operator == "contains":
+        return val_filter in val_event
+    
+    elif f.operator == "exists":
+        return event.get(field) is not None
+    
+    elif f.operator == ">":
+        try: return float(event.get(field)) > float(f.value)
+        except: return False
+        
+    elif f.operator == "<":
+        try: return float(event.get(field)) < float(f.value)
+        except: return False
+        
+    return False   
 
 @router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
-
     timeframe = body.timeframe
-    user_filters = build_dynamic_filters(body.filters)
     search_query = body.search_query.lower() if body.search_query else None
+    logic = body.operator_logic.upper() if body.operator_logic else "AND"
 
+    # 1. Ambil data dari semua source
     suricata = get_suricata_events(es, INDEX, timeframe)
     sophos = get_sophos_events(es, INDEX, timeframe)
     panw = get_panw_events(es, INDEX_PANW, timeframe)
 
-    # gabungkan semua data
     combined = suricata + sophos + panw
 
-    # --- BAGIAN YANG DIUBAH: MENERAPKAN LOGIKA OR UNTUK FILTER "is" ---
-    
-    # 1. Pisahkan filter: kumpulkan semua kriteria 'is' dan sisa filter lainnya
-    is_filters_by_field = {}
-    other_filters = []
-
-    for f in body.filters:
-        if f.operator == "is":
-            field = f.field
-            # Konversi nilai ke lowercase untuk pencocokan case-insensitive
-            value = str(f.value).lower() 
-            
-            if field not in is_filters_by_field:
-                is_filters_by_field[field] = set() # Gunakan set untuk menghindari duplikasi nilai
-            is_filters_by_field[field].add(value)
-        else:
-            other_filters.append(f)
-
-    # 2. Terapkan Logika OR untuk filter 'is' yang terkumpul
-    # Setiap field yang difilter 'is' harus cocok dengan SALAH SATU nilainya.
-    for field, allowed_values in is_filters_by_field.items():
-        # allowed_values adalah set dari nilai-nilai yang diizinkan (misalnya {"panw", "suricata"})
-        combined = [
-            x for x in combined 
-            if str(x.get(field, "")).lower() in allowed_values
-        ]
-
-    # 3. Terapkan filter lainnya secara berurutan (Logika AND)
-    # Ini sama dengan logika AND sequential yang Anda gunakan sebelumnya
-    for f in other_filters:
-        field = f.field
-        value = f.value # Nilai tetap (tidak di-lower() agar operator numerik tetap berfungsi)
-
-        if f.operator == "is_not":
-            # Perhatian: Untuk konsistensi, sebaiknya gunakan lower() juga di sini
-            combined = [x for x in combined if str(x.get(field, "")).lower() != str(value).lower()]
-
-        elif f.operator == "exists":
-            # Cek apakah field ada dan nilainya bukan None
-            combined = [x for x in combined if x.get(field) is not None]
-
-        elif f.operator == "contains":
-            combined = [x for x in combined if value.lower() in str(x.get(field, "")).lower()]
-
-        elif f.operator == "starts_with":
-            combined = [x for x in combined if str(x.get(field, "")).lower().startswith(value.lower())]
-
-        elif f.operator == ">":
-            try:
-                filter_value = float(value)
-                # Pastikan nilai field dapat dikonversi ke float, jika tidak, abaikan
-                combined = [x for x in combined if x.get(field) is not None and float(x.get(field)) > filter_value]
-            except (ValueError, TypeError):
-                # Jika nilai field bukan numerik, abaikan
-                pass
+    # 2. Logika Filter Dinamis (AND / OR)
+    if body.filters:
+        filtered_list = []
         
-        elif f.operator == "<":
-            try:
-                filter_value = float(value)
-                combined = [x for x in combined if x.get(field) is not None and float(x.get(field)) < filter_value]
-            except (ValueError, TypeError):
-                pass
-    
-    # --- END OF FILTER LOGIC MODIFICATION ---
-    
-    
-    # ----------------------------------------------------
-    # 🆕 PEMBARUAN KRITIS: TERAPKAN LOGIKA SEARCH BAR (Universal Search)
-    # ----------------------------------------------------
-    
-    if search_query:
-        # Tentukan field mana yang akan dicari (Universal Search)
-        # Tambahkan field lain jika diperlukan (misalnya 'port', 'protocol', 'application')
-        searchable_fields = [
-            "source_ip", 
-            "destination_ip", 
-            "country",      # Asumsi ini adalah source_country
-            "event_type",
-            "description",
-            "severity",
-            "mitre_stages"
-        ]
+        for event in combined:
+            if logic == "AND":
+                # LOGIKA AND: Harus lolos SEMUA filter
+                is_match = True
+                for f in body.filters:
+                    if not evaluate_condition(event, f):
+                        is_match = False
+                        break # Satu gagal, langsung coret event ini
+            else:
+                # LOGIKA OR: Cukup lolos SATU filter saja
+                is_match = False
+                for f in body.filters:
+                    if evaluate_condition(event, f):
+                        is_match = True
+                        break # Satu cocok, langsung ambil event ini
+            
+            if is_match:
+                filtered_list.append(event)
+        
+        combined = filtered_list
 
-        # Saring combined list: hanya simpan event yang cocok di SETIDAKNYA SATU field
+    # 3. Logika Search Bar (Universal Search)
+    # Search bar bersifat mempersempit hasil (AND terhadap hasil filter)
+    if search_query:
+        searchable_fields = ["source_ip", "destination_ip", "country", "event_type", "severity"]
         combined = [
             event for event in combined 
-            if any(
-                # Cek apakah search_query ada di field tersebut (case-insensitive)
-                search_query in str(event.get(field, "")).lower()
-                for field in searchable_fields
-            )
+            if any(search_query in str(event.get(f, "")).lower() for f in searchable_fields)
         ]
 
-    # Urutkan berdasarkan waktu
-    combined_sorted = sorted(
-        combined,
-        key=lambda x: x.get("timestamp", ""),
-        reverse=True
-    )
+    # 4. Sorting & Response
+    combined_sorted = sorted(combined, key=lambda x: x.get("timestamp", ""), reverse=True)
 
     return {
         "timeframe": timeframe,
+        "operator_logic_used": logic,
         "filters_applied": body.filters,
-        "search_query_applied": body.search_query, # Opsional: untuk debugging
         "count": len(combined_sorted),
         "events": combined_sorted
     }
