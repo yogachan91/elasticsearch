@@ -198,8 +198,7 @@ def get_sophos_events(es, INDEX, timeframe):
         results.append({
             "destination_ip": src.get("destination", {}).get("ip"),
             "source_ip": src.get("source", {}).get("ip"),
-            "country": src.get("source", {}).get("geo", {}).get("country_name")
-                or src.get("destination", {}).get("geo", {}).get("country_name"),
+            "country": src.get("source", {}).get("geo", {}).get("country_name"),
             "event_type": "sophos",
             "sub_type": sophos.get("log_type"),
             "severity": src.get("event", {}).get("severity_label") or src.get("log", {}).get("level"),
@@ -209,8 +208,7 @@ def get_sophos_events(es, INDEX, timeframe):
             "application": sophos.get("app_name"),
             "description": rule_name,
             "protocol": src.get("network", {}).get("transport"),
-            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name")
-                or src.get("source", {}).get("geo", {}).get("country_name"),
+            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
             "port": src.get("destination", {}).get("port") or sophos.get("dst_port"),
             "count": 1,
             "first_event": src.get("@timestamp"),
@@ -251,8 +249,7 @@ def get_panw_events(es, INDEX_PANW, timeframe):
         results.append({
             "destination_ip": src.get("destination", {}).get("ip"),
             "source_ip": src.get("source", {}).get("ip"),
-            "country": src.get("source", {}).get("geo", {}).get("country_name")
-                or src.get("destination", {}).get("geo", {}).get("country_name"),
+            "country": src.get("source", {}).get("geo", {}).get("country_name"),
             "event_type": "panw",
             "sub_type": panw.get("sub_type"),
             "severity": src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"),
@@ -262,8 +259,7 @@ def get_panw_events(es, INDEX_PANW, timeframe):
             "application": panw.get("app"),
             "description": panw.get("threat", {}).get("name"),
             "protocol": src.get("network", {}).get("transport"),
-            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name")
-                or src.get("source", {}).get("geo", {}).get("country_name"),
+            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
             "port": src.get("destination", {}).get("port") or panw.get("dest_port"),
             "count": 1,
             "first_event": src.get("@timestamp"),
@@ -680,7 +676,14 @@ def build_timeline(events: list, timeframe: str) -> list:
         interval = timedelta(minutes=3)
         time_format = "%Y-%m-%d %H:%M"
         # Start dari 24 jam yang lalu (agar genap)
-        start_time = now - timedelta(hours=24)
+        # start_time = now - timedelta(hours=24)
+        # ✅ Start dari hari ini jam 00:00
+        start_time = now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
         
         # Penyesuaian agar start_time adalah pada kelipatan 3 menit terdekat
         total_seconds_start = (start_time - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
@@ -714,7 +717,7 @@ def build_timeline(events: list, timeframe: str) -> list:
     elif timeframe in ["last7days", "last30days"]:
         # Interval harian
         interval = timedelta(days=1)
-        time_format = "%Y-%m-%d"
+        time_format = "%Y-%m-%d %H:00"
         
         days_ago = 7 if timeframe == "last7days" else 30
         start_time = now - timedelta(days=days_ago)
