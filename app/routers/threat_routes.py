@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import List, Optional, Any
+from app.elastic_client import es, get_elastic_status
 from ..elastic_client import es
 from ..services import (
     get_suricata_events,
@@ -206,6 +207,7 @@ def get_filtered_events(body: EventRequest):
 def get_risk_summary(body: EventRequest):
     try:
         timeframe = body.timeframe
+        elastic_status = get_elastic_status()
 
         suricata = get_suricata_events(es, INDEX, timeframe) or []
         sophos = get_sophos_events(es, INDEX, timeframe) or []
@@ -224,6 +226,7 @@ def get_risk_summary(body: EventRequest):
 
         return {
             "timeframe": timeframe,
+            "status_connect": elastic_status,
             "count": len(summary),
             "summary": summary,
             "mitre": mitre_stats,
