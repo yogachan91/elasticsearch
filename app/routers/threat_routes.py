@@ -1,5 +1,7 @@
 from fastapi import APIRouter
 from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import Depends
+from fastapi import Header, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Any
 from app.elastic_client import es, get_elastic_status
@@ -31,7 +33,7 @@ INDEX_SEARCH = "logs-*"
 router = APIRouter(prefix="/api/threats", tags=["Threat Analytics"])
 
 # URL backend utama untuk verifikasi token
-BACKEND_AUTH_VERIFY = os.getenv("AUTH_VERIFY_URL", "http://103.150.227.205:8080/api/auth/verify-token")
+# BACKEND_AUTH_VERIFY = os.getenv("AUTH_VERIFY_URL", "http://103.150.227.205:8080/api/auth/verify-token")
 
 # ======================================================
 # MODEL INPUT REQUEST
@@ -46,76 +48,17 @@ class EventRequest(BaseModel):
     filters: Optional[List[FilterItem]] = []
     search_query: Optional[str] = None
 
-# @router.get("/counts")
-# def threat_counts(timeframe: str = Query("yesterday")):
-#     return get_threat_counts(timeframe)
-#def threat_counts(timeframe: str = Query("yesterday"), db: Session = Depends(get_db)):
-#    data = get_threat_counts(timeframe)
-
-    # Cek jika data kosong
-    # if not data:
-    #     return {"message": "Data belum tersedia, tidak bisa di-record ke database."}
+def verify_internal_access(x_internal_service_key: str = Header(None, alias="X-Internal-Service-Key")):
+    # Tambahkan print untuk debugging sementara
+    print(f"DEBUG: Key yang diterima = {x_internal_service_key}") 
     
-    # save_to_db(data, db)
-    # return {"message": f"{len(data)} records berhasil disimpan ke DB", "data": data}
-
-
-
-# ✅ Tambahan baru: ambil data dari PostgreSQL
-# @router.get("/from-db")
-# def get_threats_from_db(db: Session = Depends(get_db)):
-#     data = db.query(CountIP).order_by(CountIP.created_date.desc()).limit(100).all()
-#     return data
-
-# ======================
-# ENDPOINT TRANSFER KE SUPABASE USER LAIN
-# ======================
-
-# SUPABASE_TARGET_URL = os.getenv("SUPABASE_TARGET_URL")
-# SUPABASE_TARGET_KEY = os.getenv("SUPABASE_TARGET_KEY")
-# TARGET_TABLE = "countip"
-
-# HEADERS = {
-#     "apikey": SUPABASE_TARGET_KEY,
-#     "Authorization": f"Bearer {SUPABASE_TARGET_KEY}",
-#     "Content-Type": "application/json",
-#     "Prefer": "return=representation"
-# }
-
-# @router.get("/transfer-countip")
-# def transfer_countip(db: Session = Depends(get_db)):
-    # 1) Ambil semua data dari lokal
-    # local_rows = db.query(CountIP).all()
-    # if not local_rows:
-    #     return {"status": "no data found"}
-
-    # 2) Siapkan payload JSON
-    # payload = []
-    # for row in local_rows:
-    #     payload.append({
-    #         "id": row.id,
-    #         "rule_name": row.rule_name,
-    #         "source_ip": row.source_ip,
-    #         "destination_ip": row.destination_ip,
-    #         "destination_geo_country": row.destination_geo_country,
-    #         "event_severity_label": row.event_severity_label,
-    #         "destination_port": row.destination_port,
-    #         "counts": row.counts,
-    #         "created_date": row.created_date.isoformat() if row.created_date else None,
-    #         "first_seen_event": row.first_seen_event.isoformat() if row.first_seen_event else None,
-    #         "last_seen_event": row.last_seen_event.isoformat() if row.last_seen_event else None,
-    #         "modul": row.modul,
-    #         "sub_type": row.sub_type
-    #     })
-
-    # 3) Kirim ke Supabase temanmu
-    # rest_url = f"{SUPABASE_TARGET_URL}/rest/v1/{TARGET_TABLE}"
-    # resp = requests.post(rest_url, json=payload, headers=HEADERS)
-
-    # if resp.status_code in [200, 201]:
-    #     return {"status": "success", "inserted": len(local_rows)}
-    # else:
-    #     return {"status": "failed", "code": resp.status_code, "detail": resp.text}
+    expected_key = "RAHASIA_SANGAT_KUAT"
+    
+    if x_internal_service_key != expected_key:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Forbidden: Key mismatch. Received: {x_internal_service_key}"
+        )
 
 def evaluate_condition(event: dict, f: FilterItem) -> bool:
     """Helper untuk mengecek apakah satu event memenuhi satu kriteria filter"""
@@ -145,7 +88,7 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
         
     return False   
 
-@router.post("/events/filter")
+@router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
 def get_filtered_events(body: EventRequest):
     timeframe = body.timeframe
     search_query = body.search_query.lower() if body.search_query else None
@@ -203,7 +146,7 @@ def get_filtered_events(body: EventRequest):
         "events": combined_sorted
     }
 
-@router.post("/events/summary")
+@router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
 def get_risk_summary(body: EventRequest):
     try:
         timeframe = body.timeframe
@@ -251,100 +194,7 @@ def get_risk_summary(body: EventRequest):
         print("🔥 ERROR:", e)
         print(traceback.format_exc())
         
-        
-# ============================================================
-# 🔐 HELPER: Verify Token ke Backend Utama
-# ============================================================
-async def verify_jwt_to_main_backend(token: str):
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            resp = await client.post(
-                BACKEND_AUTH_VERIFY,
-                json={"token": token}
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except Exception:
-            return {"valid": False}
 
-
-# ============================================================
-# 🔌 WEBSOCKET DENGAN SECURITY
-# ============================================================
-@router.websocket("/events/summary/ws")
-async def summary_websocket(ws: WebSocket):
-    # Accept WebSocket connection
-    await ws.accept()
-
-    # ============================================
-    # 🔐 Validate JWT from query parameters
-    # ============================================
-    # token = ws.query_params.get("token")
-    # if not token:
-    #     await ws.close(code=4001)
-    #     return
-
-    # validation = await verify_jwt_to_main_backend(token)
-
-    # if not validation.get("valid"):
-    #     await ws.send_text(json.dumps({"error": "Invalid or expired token"}))
-    #     await ws.close(code=4002)
-    #     return
-
-    # If valid → get user_id
-    # user_id = validation.get("user_id")
-
-    # print(f"WebSocket Connected by user_id={user_id}")
-
-    # ============================================
-    # 🔄 Main realtime loop
-    # ============================================
-    try:
-        while True:
-            # Terima request body dari frontend
-            message = await ws.receive_text()
-            body = json.loads(message)
-
-            timeframe = body.get("timeframe", "last30days")
-            filters = body.get("filters", [])
-
-            # Ambil data dari Elasticsearch
-            suricata = get_suricata_events(es, INDEX, timeframe) or []
-            sophos = get_sophos_events(es, INDEX, timeframe) or []
-            panw = get_panw_events(es, INDEX_PANW, timeframe) or []
-
-            combined = suricata + sophos + panw
-
-            # Build summary
-            summary = calculate_risk_summary(combined)
-            global_stats = calculate_global_stats(combined, timeframe)
-            event_type_stats = build_event_type_stats(suricata, sophos, panw, timeframe)
-            mitre_stats = calculate_mitre_stats(combined)
-
-            response = {
-                "timeframe": timeframe,
-                "summary": summary,
-                "global_stats": global_stats,
-                "event_type_stats": event_type_stats,
-                "mitre_stats": mitre_stats,
-                "count": len(summary)
-            }
-
-            # Kirim hasil ke frontend (real-time)
-            await ws.send_text(json.dumps(response))
-
-            # Jika ingin ada delay supaya tidak spam
-            await asyncio.sleep(0.5)
-
-    except WebSocketDisconnect:
-        print("Client disconnected")
-    except Exception as e:
-        print("WebSocket Error:", e)
-        try:
-            await ws.send_text(json.dumps({"error": str(e)}))
-        except:
-            pass
-        await ws.close()
 
 
 
