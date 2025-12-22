@@ -21,7 +21,7 @@ origins = [
     # Izinkan frontend lokal Anda
     #"http://localhost",
     #"http://localhost:8080",
-    "http://103.150.227.205:8080",
+    "http://192.168.33.91:8080",
     # Jika ada, tambahkan domain produksi frontend Anda di masa depan
     # "https://domain-frontend-anda.com", 
 ]
