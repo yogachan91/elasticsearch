@@ -148,7 +148,7 @@ def get_suricata_events(es, INDEX, timeframe):
             "sub_type": hit.get("rule", {}).get("category"),
             "severity": hit.get("event", {}).get("severity_label"),
             "timestamp": hit.get("@timestamp"),
-            "mitre_stages": hit.get("mitre", {}).get("stages"),
+            "mitre_stages": hit.get("rule", {}).get("metadata", {}).get("mitre_tactic_name"),
             "event_id": hit.get("log", {}).get("id", {}).get("uid"),
             "application": "application",
             "description": bucket["key"],
