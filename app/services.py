@@ -112,6 +112,7 @@ def get_suricata_events(es, INDEX, timeframe):
                                 "source.ip",
                                 "destination.ip",
                                 "rule.category",
+                                "rule.metadata.mitre_tactic_name",
                                 "source.geo.country_name",
                                 "destination.geo.country_name",
                                 "event.severity_label",
@@ -140,6 +141,36 @@ def get_suricata_events(es, INDEX, timeframe):
     for bucket in res["aggregations"]["by_rule"]["buckets"]:
         hit = bucket["sample_event"]["hits"]["hits"][0]["_source"] if bucket["sample_event"]["hits"]["hits"] else {}
 
+        mitre_tactic_name = (
+        hit.get("rule", {})
+            .get("metadata", {})
+            .get("mitre_tactic_name", [])
+        )
+
+        mitre_value = None
+        if mitre_tactic_name:
+            raw_mitre = mitre_tactic_name[0].strip().lower()
+
+            if raw_mitre.startswith(("initial", "reconnaissance")):
+                mitre_value = "Initial Attempts"
+            elif raw_mitre.startswith(("execution", "persistence", "privilege", "escalation")):
+                mitre_value = "Persistent Foothold"
+            elif raw_mitre.startswith(("defense", "credential", "discovery")):
+                mitre_value = "Exploration"
+            elif raw_mitre.startswith("lateral"):
+                mitre_value = "Propagation"
+            elif raw_mitre.startswith(("collection", "exfiltration", "impact")):
+                mitre_value = "Exfiltration"
+            else:
+                mitre_value = mitre_tactic_name[0]
+
+        raw_ts = hit.get("@timestamp")
+        formatted_ts = None
+
+        if raw_ts:
+            dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+
         results.append({
             "destination_ip": hit.get("destination", {}).get("ip"),
             "source_ip": hit.get("source", {}).get("ip"),
@@ -147,8 +178,9 @@ def get_suricata_events(es, INDEX, timeframe):
             "event_type": "suricata",
             "sub_type": hit.get("rule", {}).get("category"),
             "severity": hit.get("event", {}).get("severity_label"),
-            "timestamp": hit.get("@timestamp"),
-            "mitre_stages": hit.get("rule", {}).get("metadata", {}).get("mitre_tactic_name"),
+            "timestamp": formatted_ts,
+            "mitre_stages": mitre_value,
+            "mitre_detail": mitre_tactic_name[0] if mitre_tactic_name else None,
             "event_id": hit.get("log", {}).get("id", {}).get("uid"),
             "application": "application",
             "description": bucket["key"],
@@ -195,6 +227,35 @@ def get_sophos_events(es, INDEX, timeframe):
             "unknown"
         )
 
+        mitre_tactic_name = (
+        src.get("mitre", {})
+            .get("stages")
+        )
+
+        mitre_value = None
+        if mitre_tactic_name:
+            raw_mitre = mitre_tactic_name[0].strip().lower()
+
+            if raw_mitre.startswith(("initial", "reconnaissance")):
+                mitre_value = "Initial Attempts"
+            elif raw_mitre.startswith(("execution", "persistence", "privilege", "escalation")):
+                mitre_value = "Persistent Foothold"
+            elif raw_mitre.startswith(("defense", "credential", "discovery")):
+                mitre_value = "Exploration"
+            elif raw_mitre.startswith("lateral"):
+                mitre_value = "Propagation"
+            elif raw_mitre.startswith(("collection", "exfiltration", "impact")):
+                mitre_value = "Exfiltration"
+            else:
+                mitre_value = mitre_tactic_name
+
+        raw_ts = src.get("@timestamp")
+        formatted_ts = None
+
+        if raw_ts:
+            dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+
         results.append({
             "destination_ip": src.get("destination", {}).get("ip"),
             "source_ip": src.get("source", {}).get("ip"),
@@ -202,8 +263,9 @@ def get_sophos_events(es, INDEX, timeframe):
             "event_type": "sophos",
             "sub_type": sophos.get("log_type"),
             "severity": src.get("event", {}).get("severity_label") or src.get("log", {}).get("level"),
-            "timestamp": src.get("@timestamp"),
-            "mitre_stages": src.get("mitre", {}).get("stages"),
+            "timestamp": formatted_ts,
+            "mitre_stages": mitre_value,
+            "mitre_detail": src.get("mitre", {}).get("stages"),
             "event_id": src.get("log", {}).get("id", {}).get("uid"),
             "application": sophos.get("app_name"),
             "description": rule_name,
@@ -246,6 +308,35 @@ def get_panw_events(es, INDEX_PANW, timeframe):
         src = h["_source"]
         panw = src.get("panw", {}).get("panos", {})
 
+        mitre_tactic_name = (
+        src.get("mitre", {})
+            .get("stages")
+        )
+
+        mitre_value = None
+        if mitre_tactic_name:
+            raw_mitre = mitre_tactic_name[0].strip().lower()
+
+            if raw_mitre.startswith(("initial", "reconnaissance")):
+                mitre_value = "Initial Attempts"
+            elif raw_mitre.startswith(("execution", "persistence", "privilege", "escalation")):
+                mitre_value = "Persistent Foothold"
+            elif raw_mitre.startswith(("defense", "credential", "discovery")):
+                mitre_value = "Exploration"
+            elif raw_mitre.startswith("lateral"):
+                mitre_value = "Propagation"
+            elif raw_mitre.startswith(("collection", "exfiltration", "impact")):
+                mitre_value = "Exfiltration"
+            else:
+                mitre_value = mitre_tactic_name
+
+        raw_ts = src.get("@timestamp")
+        formatted_ts = None
+
+        if raw_ts:
+            dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+
         results.append({
             "destination_ip": src.get("destination", {}).get("ip"),
             "source_ip": src.get("source", {}).get("ip"),
@@ -253,8 +344,9 @@ def get_panw_events(es, INDEX_PANW, timeframe):
             "event_type": "panw",
             "sub_type": panw.get("sub_type"),
             "severity": src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"),
-            "timestamp": src.get("@timestamp"),
-            "mitre_stages": src.get("mitre", {}).get("stages"),
+            "timestamp": formatted_ts,
+            "mitre_stages": mitre_value,
+            "mitre_detail": src.get("mitre", {}).get("stages"),
             "event_id": panw.get("seqno"),
             "application": panw.get("app"),
             "description": panw.get("threat", {}).get("name"),
