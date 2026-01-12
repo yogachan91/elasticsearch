@@ -155,7 +155,7 @@ def get_suricata_events(es, INDEX, timeframe):
                 mitre_value = "Initial Attempts"
             elif raw_mitre.startswith(("execution", "persistence", "privilege", "escalation")):
                 mitre_value = "Persistent Foothold"
-            elif raw_mitre.startswith(("defense", "credential", "discovery")):
+            elif raw_mitre.startswith(("defense", "credential", "discovery", "command")):
                 mitre_value = "Exploration"
             elif raw_mitre.startswith("lateral"):
                 mitre_value = "Propagation"
