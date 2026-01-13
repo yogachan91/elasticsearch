@@ -89,6 +89,7 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
     return False   
 
 @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
+# @router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
     timeframe = body.timeframe
     search_query = body.search_query.lower() if body.search_query else None
@@ -147,6 +148,7 @@ def get_filtered_events(body: EventRequest):
     }
 
 @router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
+# @router.post("/events/summary")
 def get_risk_summary(body: EventRequest):
     try:
         timeframe = body.timeframe

@@ -749,11 +749,20 @@ def safe_parse_timestamp(ts):
     if not ts:
         return None
     try:
-        # Mencoba parsing format umum
-        return datetime.fromisoformat(ts.replace('Z', '+00:00'))
-    except ValueError:
-        # Coba format lain jika perlu, atau kembalikan None jika gagal
-        return None
+        # ISO format (2025-01-13T10:30:00Z)
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except Exception:
+        try:
+            # Format DB umum
+            dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+    # 🔴 PAKSA TIMEZONE JIKA NAIVE
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("Asia/Jakarta"))
+
+    return dt
 
 def build_timeline(events: list, timeframe: str) -> list:
     # Mengambil waktu saat ini (UTC disarankan untuk konsistensi)
@@ -828,6 +837,9 @@ def build_timeline(events: list, timeframe: str) -> list:
     
     for event in events:
         ts_obj = safe_parse_timestamp(event.get("timestamp"))
+        
+        if not ts_obj:
+            continue
         
         if ts_obj and ts_obj >= start_time:
             # Hitung 'bin' waktu untuk event ini
@@ -1054,7 +1066,8 @@ def calculate_mitre_stats(events):
     # Ambil list nama stage yang wajib muncul dari keys mapping
     REQUIRED_STAGES = list(STAGE_DETAILS_MAPPING.keys())
     
-    total_events = len(events)
+    # total_events = len(events)
+    total_events = sum(1 for e in events if e is not None)
     mitre_count = defaultdict(int)
 
     # 2. Hitung frekuensi event untuk stage yang ADA
@@ -1070,6 +1083,9 @@ def calculate_mitre_stats(events):
         # Tambahkan ke hitungan hanya jika stage tersebut termasuk dalam 5 yang dibutuhkan
         if stage in REQUIRED_STAGES:
             mitre_count[stage] += 1
+    
+    # ✅ TOTAL MITRE (INI YANG DIPAKAI UNTUK PERSENTASE)
+    total_mitre = sum(mitre_count.values())
 
     result = []
     
@@ -1079,14 +1095,14 @@ def calculate_mitre_stats(events):
         count = mitre_count.get(stage, 0)
         
         # Hitung persentase
-        persen_value = (count / total_events * 100) if total_events > 0 else 0
+        persen_value = (count / total_mitre * 100) if total_events > 0 else 0
         
         # Dapatkan detail (severity dan description) dari mapping
         stage_detail = STAGE_DETAILS_MAPPING[stage]
         
         result.append({
             "stages": stage,
-            "total_all": total_events,
+            "total_all": total_mitre,
             "total_data": count,
             "persen": f"{persen_value:.2f}",
             "severity": stage_detail["severity"],          # <-- AMBIL DARI DETAIL
