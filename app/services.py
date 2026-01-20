@@ -90,63 +90,144 @@ def get_time_range_for_stats(timeframe: str):
     return start, now
 
 def get_suricata_events(es, INDEX, timeframe):
+    # query = {
+    #     "size": 0,
+    #     "query": {
+    #         "bool": {
+    #             "filter": [
+    #                 get_time_range_filter(timeframe),
+    #                 {"term": {"event.module": "suricata"}}
+    #             ]
+    #         }
+    #     },
+    #     "aggs": {
+    #         "by_rule": {
+    #             "terms": {"field": "rule.name.keyword", "size": 500},
+    #             "aggs": {
+    #                 "sample_event": {
+    #                     "top_hits": {
+    #                         "size": 1,
+    #                         "sort": [{"@timestamp": {"order": "desc"}}],
+    #                         "_source": [
+    #                             "source.ip",
+    #                             "destination.ip",
+    #                             "rule.category",
+    #                             "rule.metadata.mitre_tactic_name",
+    #                             "source.geo.country_name",
+    #                             "destination.geo.country_name",
+    #                             "event.severity_label",
+    #                             "destination.port",
+    #                             "mitre.stages",
+    #                             "log.id.uid",
+    #                             "network.transport",
+    #                             "source.geo.location.lon",
+    #                             "source.geo.location.lat",
+    #                             "destination.geo.location.lon",
+    #                             "destination.geo.location.lat",
+    #                             "@timestamp"
+    #                         ]
+    #                     }
+    #                 },
+    #                 "first_event": {"min": {"field": "@timestamp"}},
+    #                 "last_event": {"max": {"field": "@timestamp"}}
+    #             }
+    #         }
+    #     }
+    # }
+
+    # res = es.search(index=INDEX, body=query)
+
+    # results = []
+    # for bucket in res["aggregations"]["by_rule"]["buckets"]:
+    #     hit = bucket["sample_event"]["hits"]["hits"][0]["_source"] if bucket["sample_event"]["hits"]["hits"] else {}
+
+    #     mitre_tactic_name = (
+    #     hit.get("rule", {})
+    #         .get("metadata", {})
+    #         .get("mitre_tactic_name", [])
+    #     )
+
+    #     mitre_value = None
+    #     if mitre_tactic_name:
+    #         raw_mitre = mitre_tactic_name[0].strip().lower()
+
+    #         if raw_mitre.startswith(("initial", "reconnaissance")):
+    #             mitre_value = "Initial Attempts"
+    #         elif raw_mitre.startswith(("execution", "persistence", "privilege", "escalation")):
+    #             mitre_value = "Persistent Foothold"
+    #         elif raw_mitre.startswith(("defense", "credential", "discovery", "command")):
+    #             mitre_value = "Exploration"
+    #         elif raw_mitre.startswith("lateral"):
+    #             mitre_value = "Propagation"
+    #         elif raw_mitre.startswith(("collection", "exfiltration", "impact")):
+    #             mitre_value = "Exfiltration"
+    #         else:
+    #             mitre_value = mitre_tactic_name[0]
+
+    #     raw_ts = hit.get("@timestamp")
+    #     formatted_ts = None
+
+    #     if raw_ts:
+    #         dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+    #         formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    #     results.append({
+    #         "destination_ip": hit.get("destination", {}).get("ip"),
+    #         "source_ip": hit.get("source", {}).get("ip"),
+    #         "country": hit.get("source", {}).get("geo", {}).get("country_name"),
+    #         "event_type": "suricata",
+    #         "sub_type": hit.get("rule", {}).get("category"),
+    #         "severity": hit.get("event", {}).get("severity_label"),
+    #         "timestamp": formatted_ts,
+    #         "mitre_stages": mitre_value,
+    #         "mitre_detail": mitre_tactic_name[0] if mitre_tactic_name else None,
+    #         "event_id": hit.get("log", {}).get("id", {}).get("uid"),
+    #         "application": "application",
+    #         "description": bucket["key"],
+    #         "protocol": hit.get("network", {}).get("transport"),
+    #         "destination_country": hit.get("destination", {}).get("geo", {}).get("country_name"),
+    #         "port": hit.get("destination", {}).get("port"),
+    #         "count": bucket["doc_count"],
+    #         "first_event": bucket["first_event"].get("value_as_string"),
+    #         "last_event": bucket["last_event"].get("value_as_string"),
+    #         "source_longitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
+    #         "source_latitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
+    #         "destination_longitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
+    #         "destination_latitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lat")
+    #     })
+
+    # return results
+
     query = {
-        "size": 0,
-        "query": {
-            "bool": {
-                "filter": [
-                    get_time_range_filter(timeframe),
-                    {"term": {"event.module": "suricata"}}
-                ]
-            }
-        },
-        "aggs": {
-            "by_rule": {
-                "terms": {"field": "rule.name.keyword", "size": 500},
-                "aggs": {
-                    "sample_event": {
-                        "top_hits": {
-                            "size": 1,
-                            "sort": [{"@timestamp": {"order": "desc"}}],
-                            "_source": [
-                                "source.ip",
-                                "destination.ip",
-                                "rule.category",
-                                "rule.metadata.mitre_tactic_name",
-                                "source.geo.country_name",
-                                "destination.geo.country_name",
-                                "event.severity_label",
-                                "destination.port",
-                                "mitre.stages",
-                                "log.id.uid",
-                                "network.transport",
-                                "source.geo.location.lon",
-                                "source.geo.location.lat",
-                                "destination.geo.location.lon",
-                                "destination.geo.location.lat",
-                                "@timestamp"
-                            ]
-                        }
-                    },
-                    "first_event": {"min": {"field": "@timestamp"}},
-                    "last_event": {"max": {"field": "@timestamp"}}
-                }
-            }
+    "size": 500,  
+    "track_total_hits": True,  # Agar bisa menghitung total data lebih dari 10.000
+    "query": {
+        "bool": {
+            "filter": [
+                get_time_range_filter(timeframe),
+                {"term": {"event.module": "suricata"}}
+            ]
         }
+    },
+    "sort": [
+        {"@timestamp": {"order": "desc"}} # Urutkan dari log terbaru
+    ]
     }
 
     res = es.search(index=INDEX, body=query)
+    total_data_found = res["hits"]["total"]["value"]
 
     results = []
-    for bucket in res["aggregations"]["by_rule"]["buckets"]:
-        hit = bucket["sample_event"]["hits"]["hits"][0]["_source"] if bucket["sample_event"]["hits"]["hits"] else {}
+
+    for hit_wrapper in res["hits"]["hits"]:
+        hit = hit_wrapper.get("_source", {})
 
         mitre_tactic_name = (
         hit.get("rule", {})
-            .get("metadata", {})
-            .get("mitre_tactic_name", [])
+           .get("metadata", {})
+           .get("mitre_tactic_name", [])
         )
-
+        
         mitre_value = None
         if mitre_tactic_name:
             raw_mitre = mitre_tactic_name[0].strip().lower()
@@ -166,34 +247,33 @@ def get_suricata_events(es, INDEX, timeframe):
 
         raw_ts = hit.get("@timestamp")
         formatted_ts = None
-
         if raw_ts:
-            dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
-            formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
-
+            try:
+                dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                formatted_ts = raw_ts
+    
         results.append({
-            "destination_ip": hit.get("destination", {}).get("ip"),
+            "timestamp": formatted_ts,
             "source_ip": hit.get("source", {}).get("ip"),
+            "destination_ip": hit.get("destination", {}).get("ip"),
+            "port": hit.get("destination", {}).get("port"),
+            "protocol": hit.get("network", {}).get("transport"),
             "country": hit.get("source", {}).get("geo", {}).get("country_name"),
+            "destination_country": hit.get("destination", {}).get("geo", {}).get("country_name"),
+            "severity": hit.get("event", {}).get("severity_label"),
             "event_type": "suricata",
             "sub_type": hit.get("rule", {}).get("category"),
-            "severity": hit.get("event", {}).get("severity_label"),
-            "timestamp": formatted_ts,
+            "description": hit.get("rule", {}).get("name"), # Nama rule sebagai deskripsi event
             "mitre_stages": mitre_value,
             "mitre_detail": mitre_tactic_name[0] if mitre_tactic_name else None,
             "event_id": hit.get("log", {}).get("id", {}).get("uid"),
-            "application": "application",
-            "description": bucket["key"],
-            "protocol": hit.get("network", {}).get("transport"),
-            "destination_country": hit.get("destination", {}).get("geo", {}).get("country_name"),
-            "port": hit.get("destination", {}).get("port"),
-            "count": bucket["doc_count"],
-            "first_event": bucket["first_event"].get("value_as_string"),
-            "last_event": bucket["last_event"].get("value_as_string"),
             "source_longitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
             "source_latitude": hit.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
             "destination_longitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
-            "destination_latitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lat")
+            "destination_latitude": hit.get("destination", {}).get("geo", {}).get("location", {}).get("lat"),
+            "application": "application"
         })
 
     return results
@@ -1095,7 +1175,7 @@ def calculate_mitre_stats(events):
         count = mitre_count.get(stage, 0)
         
         # Hitung persentase
-        persen_value = (count / total_mitre * 100) if total_events > 0 else 0
+        persen_value = (count / total_mitre * 100) if total_mitre > 0 else 0
         
         # Dapatkan detail (severity dan description) dari mapping
         stage_detail = STAGE_DETAILS_MAPPING[stage]
