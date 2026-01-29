@@ -89,6 +89,127 @@ def get_time_range_for_stats(timeframe: str):
 
     return start, now
 
+def get_combined_events(es, timeframe, filters=None, search_query=None):
+    # Pattern index gabungan
+    index_pattern = "logs-*, .ds-logs-suricata*, .ds-logs-sophos*, .ds-logs-panw.panos-default-*"
+    
+    # 1. Penentuan Waktu (Sesuai timeframe)
+    if timeframe == "today": 
+        gte, lte = "now/d", "now"
+    elif timeframe == "yesterday": 
+        gte, lte = "now-1d/d", "now"
+    elif timeframe == "last7days": 
+        gte, lte = "now-7d/d", "now"
+    else: 
+        gte, lte = "now-30d/d", "now"
+
+    # 2. Filter Dasar (Wajib)
+    must_filters = [
+        {"range": {"@timestamp": {"gte": gte, "lte": lte, "time_zone": "+07:00"}}},
+        {"terms": {"event.module": ["suricata", "sophos", "panw"]}},
+        {"exists": {"field": "source.ip"}}
+    ]
+
+    # 3. Logika Filter Pencarian Kolom (Mapping Dinamis)
+    if filters:
+        for f in filters:
+            field = f.field
+            val = f.value
+            
+            if field == "severity":
+                # Handle 3 cara penulisan severity di 3 vendor berbeda
+                must_filters.append({"bool": {"should": [
+                    {"term": {"event.severity_label": val}},
+                    {"term": {"log.level": val}},
+                    {"term": {"log.syslog.severity.name": val}}
+                ], "minimum_should_match": 1}})
+            elif field == "mitre_stages":
+                # Handle perbedaan field MITRE
+                must_filters.append({"bool": {"should": [
+                    {"term": {"rule.metadata.mitre_tactic_name": val}},
+                    {"term": {"mitre.stages": val}}
+                ], "minimum_should_match": 1}})
+            elif field == "source_ip":
+                must_filters.append({"bool": {"should": [
+                    {"term": {"source.ip": val}}
+                ], "minimum_should_match": 1}})
+            elif field == "destination_ip":
+                must_filters.append({"bool": {"should": [
+                    {"term": {"destination.ip": val}}
+                ], "minimum_should_match": 1}})
+            elif field == "event_type":
+                must_filters.append({"term": {"event.module": val}})
+            else:
+                # Field standar ECS (source.ip, destination.ip, dll)
+                must_filters.append({"term": {field: val}})
+
+    # 4. Logika Search Bar (Mencari di banyak field sekaligus)
+    if search_query:
+        must_filters.append({
+            "multi_match": {
+                "query": search_query,
+                "fields": [
+                    "source.ip", "destination.ip", 
+                    "source.geo.country_name", "destination.geo.country_name",
+                    "event.module", "network.transport", "event.severity_label"
+                ],
+                "type": "phrase_prefix"
+            }
+        })
+
+    # 5. Eksekusi Query ke Elasticsearch
+    query = {
+        "size": 500,
+        "track_total_hits": True,
+        "query": {"bool": {"filter": must_filters}},
+        "sort": [{"@timestamp": {"order": "desc"}}]
+    }
+
+    res = es.search(index=index_pattern, body=query)
+    hits = res.get("hits", {}).get("hits", [])
+    
+    # 6. Universal Mapper (Menyatukan Output JSON)
+    results = []
+    for h in hits:
+        src = h["_source"]
+        
+        # Ekstraksi field yang lokasinya berbeda-beda di tiap vendor
+        severity = (src.get("event", {}).get("severity_label") or 
+                    src.get("log", {}).get("level") or 
+                    src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"))
+
+        mitre_raw = src.get("rule", {}).get("metadata", {}).get("mitre_tactic_name", [])
+        if not mitre_raw: 
+            mitre_raw = src.get("mitre", {}).get("stages", [])
+
+        # Ambil deskripsi/rule name
+        desc = (src.get("rule", {}).get("name") or 
+                src.get("sophos", {}).get("xg", {}).get("message") or 
+                src.get("panw", {}).get("panos", {}).get("threat", {}).get("name"))
+
+        # Mapping ke format final
+        results.append({
+            "timestamp": src.get("@timestamp"),
+            "event_type": src.get("event", {}).get("module"),
+            "source_ip": src.get("source", {}).get("ip"),
+            "destination_ip": src.get("destination", {}).get("ip"),
+            "port": src.get("destination", {}).get("port") or src.get("sophos", {}).get("xg", {}).get("dst_port"),
+            "protocol": src.get("network", {}).get("transport"),
+            "country": src.get("source", {}).get("geo", {}).get("country_name"),
+            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
+            "severity": severity,
+            "mitre_stages": mitre_raw[0] if isinstance(mitre_raw, list) and mitre_raw else mitre_raw,
+            "description": desc,
+            "sub_type": src.get("rule", {}).get("category") or src.get("log_type") or src.get("sub_type"),
+            "event_id": src.get("log", {}).get("id", {}).get("uid") or src.get("seqno"),
+            "source_longitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
+            "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
+            "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
+            "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat"),
+        })
+        
+    return results
+
 def get_suricata_events(es, INDEX, timeframe):
     # query = {
     #     "size": 0,
@@ -263,7 +384,7 @@ def get_suricata_events(es, INDEX, timeframe):
             "country": hit.get("source", {}).get("geo", {}).get("country_name"),
             "destination_country": hit.get("destination", {}).get("geo", {}).get("country_name"),
             "severity": hit.get("event", {}).get("severity_label"),
-            "event_type": "suricata",
+            "event_type": hit.get("event", {}).get("module"),
             "sub_type": hit.get("rule", {}).get("category"),
             "description": hit.get("rule", {}).get("name"), # Nama rule sebagai deskripsi event
             "mitre_stages": mitre_value,

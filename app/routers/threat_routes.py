@@ -14,7 +14,8 @@ from ..services import (
     calculate_global_stats,
     build_event_type_stats,
     calculate_mitre_stats,
-    calculate_global_attack
+    calculate_global_attack,
+    get_combined_events
 )
 import requests
 import os
@@ -90,61 +91,76 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
 # @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
 @router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
-    timeframe = body.timeframe
-    search_query = body.search_query.lower() if body.search_query else None
-    logic = body.operator_logic.upper() if body.operator_logic else "AND"
-
-    # 1. Ambil data dari semua source
-    suricata = get_suricata_events(es, INDEX, timeframe)
-    sophos = get_sophos_events(es, INDEX, timeframe)
-    panw = get_panw_events(es, INDEX_PANW, timeframe)
-
-    combined = suricata + sophos + panw
-
-    # 2. Logika Filter Dinamis (AND / OR)
-    if body.filters:
-        filtered_list = []
-        
-        for event in combined:
-            if logic == "AND":
-                # LOGIKA AND: Harus lolos SEMUA filter
-                is_match = True
-                for f in body.filters:
-                    if not evaluate_condition(event, f):
-                        is_match = False
-                        break # Satu gagal, langsung coret event ini
-            else:
-                # LOGIKA OR: Cukup lolos SATU filter saja
-                is_match = False
-                for f in body.filters:
-                    if evaluate_condition(event, f):
-                        is_match = True
-                        break # Satu cocok, langsung ambil event ini
-            
-            if is_match:
-                filtered_list.append(event)
-        
-        combined = filtered_list
-
-    # 3. Logika Search Bar (Universal Search)
-    # Search bar bersifat mempersempit hasil (AND terhadap hasil filter)
-    if search_query:
-        searchable_fields = ["source_ip", "destination_ip", "country", "event_type", "severity"]
-        combined = [
-            event for event in combined 
-            if any(search_query in str(event.get(f, "")).lower() for f in searchable_fields)
-        ]
-
-    # 4. Sorting & Response
-    combined_sorted = sorted(combined, key=lambda x: x.get("timestamp", ""), reverse=True)
+    # Langsung panggil fungsi gabungan
+    # Elasticsearch melakukan semua filter & search di sisi server
+    events = get_combined_events(
+        es=es, 
+        timeframe=body.timeframe, 
+        filters=body.filters, 
+        search_query=body.search_query
+    )
 
     return {
-        "timeframe": timeframe,
-        "operator_logic_used": logic,
-        "filters_applied": body.filters,
-        "count": len(combined_sorted),
-        "events": combined_sorted
+        "timeframe": body.timeframe,
+        "count": len(events),
+        "events": events
     }
+# def get_filtered_events(body: EventRequest):
+#     timeframe = body.timeframe
+#     search_query = body.search_query.lower() if body.search_query else None
+#     logic = body.operator_logic.upper() if body.operator_logic else "AND"
+
+#     # 1. Ambil data dari semua source
+#     suricata = get_suricata_events(es, INDEX, timeframe)
+#     sophos = get_sophos_events(es, INDEX, timeframe)
+#     panw = get_panw_events(es, INDEX_PANW, timeframe)
+
+#     combined = suricata + sophos + panw
+
+#     # 2. Logika Filter Dinamis (AND / OR)
+#     if body.filters:
+#         filtered_list = []
+        
+#         for event in combined:
+#             if logic == "AND":
+#                 # LOGIKA AND: Harus lolos SEMUA filter
+#                 is_match = True
+#                 for f in body.filters:
+#                     if not evaluate_condition(event, f):
+#                         is_match = False
+#                         break # Satu gagal, langsung coret event ini
+#             else:
+#                 # LOGIKA OR: Cukup lolos SATU filter saja
+#                 is_match = False
+#                 for f in body.filters:
+#                     if evaluate_condition(event, f):
+#                         is_match = True
+#                         break # Satu cocok, langsung ambil event ini
+            
+#             if is_match:
+#                 filtered_list.append(event)
+        
+#         combined = filtered_list
+
+#     # 3. Logika Search Bar (Universal Search)
+#     # Search bar bersifat mempersempit hasil (AND terhadap hasil filter)
+#     if search_query:
+#         searchable_fields = ["source_ip", "destination_ip", "country", "event_type", "severity"]
+#         combined = [
+#             event for event in combined 
+#             if any(search_query in str(event.get(f, "")).lower() for f in searchable_fields)
+#         ]
+
+#     # 4. Sorting & Response
+#     combined_sorted = sorted(combined, key=lambda x: x.get("timestamp", ""), reverse=True)
+
+#     return {
+#         "timeframe": timeframe,
+#         "operator_logic_used": logic,
+#         "filters_applied": body.filters,
+#         "count": len(combined_sorted),
+#         "events": combined_sorted
+#     }
 
 
 # @router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
