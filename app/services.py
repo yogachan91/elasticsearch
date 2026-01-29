@@ -845,67 +845,6 @@ def calculate_global_stats(timeframe):
             ]
         }
 
-
-def calculate_global_stats(events, timeframe):
-    start, end = get_time_range_for_stats(timeframe)
-
-    total = len(events)
-    
-    # ----------------------------------------------------
-    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND DIMULAI DI SINI
-    # ----------------------------------------------------
-    
-    if timeframe == "today":
-        # Jika timeframe adalah "today", bagi total dengan 900
-        # per_second = round(total / 900, 2)
-        timeframe2 = "last1minutes"
-
-        suricata2 = get_suricata_events(es, INDEX, timeframe2) or []
-        sophos2 = get_sophos_events(es, INDEX, timeframe2) or []
-        panw2 = get_panw_events(es, INDEX_PANW, timeframe2) or []
-
-        combined2 = suricata2 + sophos2 + panw2
-        per_second = len(combined2)
-    else:
-        # Jika timeframe adalah selain "today", nilai per_second adalah 0
-        per_second = 0 
-        
-    # ----------------------------------------------------
-    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND SELESAI DI SINI
-    # ----------------------------------------------------
-
-    return {
-        "total": total,
-        # Ubah key "seconds" menjadi sesuatu yang lebih deskriptif 
-        # karena nilainya tidak lagi mewakili event/second yang sebenarnya.
-        # Misalnya, kita tetap menggunakan "per_second"
-        "seconds": per_second 
-    }
-    
-
-# def build_timeline(events, timeframe):
-#     timeline = defaultdict(int)
-
-#     for ev in events:
-#         ts = ev.get("timestamp")
-#         if ts is None:
-#             continue
-
-#         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-#         if timeframe in ["today", "8hours", "last8hours", "24hours", "last24hours"]:
-#             key = dt.strftime("%Y-%m-%d %H:00")   # tampilkan tanggal + jam
-#         else:
-#             # timeline per hari + jam (kalau mau jam juga ditampilkan)
-#             key = dt.strftime("%Y-%m-%d %H:00")
-
-#         timeline[key] += 1
-
-#     return [
-#         {"timeline": k, "count": v}
-#         for k, v in sorted(timeline.items())
-#     ]
-
 # Pastikan semua event timestamp diubah ke objek datetime agar bisa dihitung.
 # Asumsi: Timestamp di event adalah string ISO-like (e.g., "2025-11-11T01:00:00Z")
 def safe_parse_timestamp(ts):
