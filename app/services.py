@@ -844,6 +844,43 @@ def calculate_global_stats(timeframe):
                 {"event_type": "panw", "total": 0}
             ]
         }
+
+
+def calculate_global_stats(events, timeframe):
+    start, end = get_time_range_for_stats(timeframe)
+
+    total = len(events)
+    
+    # ----------------------------------------------------
+    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND DIMULAI DI SINI
+    # ----------------------------------------------------
+    
+    if timeframe == "today":
+        # Jika timeframe adalah "today", bagi total dengan 900
+        # per_second = round(total / 900, 2)
+        timeframe2 = "last1minutes"
+
+        suricata2 = get_suricata_events(es, INDEX, timeframe2) or []
+        sophos2 = get_sophos_events(es, INDEX, timeframe2) or []
+        panw2 = get_panw_events(es, INDEX_PANW, timeframe2) or []
+
+        combined2 = suricata2 + sophos2 + panw2
+        per_second = len(combined2)
+    else:
+        # Jika timeframe adalah selain "today", nilai per_second adalah 0
+        per_second = 0 
+        
+    # ----------------------------------------------------
+    # KODE PERUBAHAN UTAMA UNTUK PER_SECOND SELESAI DI SINI
+    # ----------------------------------------------------
+
+    return {
+        "total": total,
+        # Ubah key "seconds" menjadi sesuatu yang lebih deskriptif 
+        # karena nilainya tidak lagi mewakili event/second yang sebenarnya.
+        # Misalnya, kita tetap menggunakan "per_second"
+        "seconds": per_second 
+    }
     
 
 # def build_timeline(events, timeframe):
@@ -1012,6 +1049,128 @@ def safe_parse_timestamp(ts):
 #          pass
          
 #     return full_timeline
+def build_timeline(events: list, timeframe: str) -> list:
+    # Mengambil waktu saat ini (UTC disarankan untuk konsistensi)
+    jakarta_tz = ZoneInfo("Asia/Jakarta")
+    now = datetime.now(tz=jakarta_tz)
+    
+    # 1. Tentukan Granularitas, Format Output, dan Jangkauan Waktu
+    
+    # Granularitas (Interval) dan Format Output
+    if timeframe == "today":
+        # 24 jam terakhir, interval 3 menit
+        interval = timedelta(minutes=3)
+        time_format = "%Y-%m-%d %H:%M"
+        # Start dari 24 jam yang lalu (agar genap)
+        # start_time = now - timedelta(hours=24)
+        # ✅ Start dari hari ini jam 00:00
+        start_time = now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0
+        )
+        
+        # Penyesuaian agar start_time adalah pada kelipatan 3 menit terdekat
+        total_seconds_start = (start_time - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
+        remainder = total_seconds_start % (3 * 60)
+        if remainder != 0:
+            start_time -= timedelta(seconds=remainder)
+    
+    elif timeframe == "last1hours":
+        # 24 jam terakhir, interval 3 menit
+        interval = timedelta(minutes=5)
+        time_format = "%Y-%m-%d %H:%M"
+        # Start dari 24 jam yang lalu (agar genap)
+        start_time = now - timedelta(hours=1)
+        
+        # Penyesuaian agar start_time adalah pada kelipatan 3 menit terdekat
+        total_seconds_start = (start_time - datetime(1970, 1, 1, tzinfo=timezone.utc)).total_seconds()
+        remainder = total_seconds_start % (3 * 60)
+        if remainder != 0:
+            start_time -= timedelta(seconds=remainder)
+            
+    elif timeframe == "last24hours":
+        # 24 jam terakhir, interval 1 jam
+        interval = timedelta(hours=1)
+        time_format = "%Y-%m-%d %H:00"
+        # Start dari 24 jam yang lalu (agar genap)
+        start_time = now - timedelta(hours=24)
+        
+        # Penyesuaian agar start_time adalah pada jam genap
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
+        
+    elif timeframe in ["last7days", "last30days"]:
+        # Interval harian
+        interval = timedelta(days=1)
+        time_format = "%Y-%m-%d %H:00"
+        
+        days_ago = 7 if timeframe == "last7days" else 30
+        start_time = now - timedelta(days=days_ago)
+        
+        # Penyesuaian agar start_time adalah pada awal hari
+        start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+    else:
+        # Fallback atau penanganan timeframe yang tidak dikenal
+        return []
+
+    # 2. Agregasi Event ke Interval Waktu
+    
+    # Inisialisasi dictionary untuk menyimpan hitungan: {timestamp_key: count}
+    timeline_counts = defaultdict(int) 
+    
+    for event in events:
+        ts_obj = safe_parse_timestamp(event.get("timestamp"))
+        
+        if not ts_obj:
+            continue
+        
+        if ts_obj and ts_obj >= start_time:
+            # Hitung 'bin' waktu untuk event ini
+            
+            # Cari selisih waktu dari start_time
+            delta = ts_obj - start_time
+            
+            # Hitung jumlah interval yang dilewati
+            num_intervals = math.floor(delta.total_seconds() / interval.total_seconds())
+            
+            # Tentukan timestamp awal dari bin waktu tersebut
+            bin_start_time = start_time + (num_intervals * interval)
+            
+            # Format kunci (key) untuk agregasi
+            key = bin_start_time.strftime(time_format)
+            
+            timeline_counts[key] += 1
+            
+            
+    # 3. Buat Garis Waktu Penuh (Full Timeline) dan Isi Nilai 0
+
+    full_timeline = []
+    current_time = start_time
+    
+    # Loop dari waktu awal (start_time) hingga waktu saat ini (now)
+    while current_time <= now:
+        
+        # Format kunci waktu untuk dicocokkan dengan hasil agregasi
+        key = current_time.strftime(time_format)
+        
+        full_timeline.append({
+            "timeline": key,
+            "count": timeline_counts.get(key, 0) # Ambil count, default 0 jika tidak ada event
+        })
+        
+        # Pindah ke interval waktu berikutnya
+        current_time += interval
+        
+    # Hapus entry terakhir jika melebihi waktu saat ini (now), 
+    # meskipun loop while sudah membatasi dengan <= now
+    if full_timeline and current_time > now:
+         # Hanya memastikan bahwa timeline tidak memiliki slot waktu masa depan 
+         # yang mungkin tercipta jika intervalnya besar.
+         pass
+         
+    return full_timeline
 
 # -------------------------------------------------------------------------
 # FUNGSI UTAMA ANDA (TETAP SAMA, HANYA MENGGUNAKAN FUNGSI BUILD_TIMELINE BARU)

@@ -15,7 +15,9 @@ from ..services import (
     calculate_global_stats,
     build_event_type_stats,
     calculate_mitre_stats,
-    calculate_global_attack
+    calculate_global_attack,
+    calculate_global_attack,
+    build_event_type_ingest
 )
 import requests
 import os
@@ -87,6 +89,7 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
         
     return False   
 
+
 # @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
 @router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
@@ -145,6 +148,7 @@ def get_filtered_events(body: EventRequest):
         "count": len(combined_sorted),
         "events": combined_sorted
     }
+
 
 # @router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
 @router.post("/events/summary")
