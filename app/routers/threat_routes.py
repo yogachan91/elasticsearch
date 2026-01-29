@@ -5,7 +5,6 @@ from fastapi import Header, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Any
 from app.elastic_client import es, get_elastic_status
-from ..elastic_client import es
 from ..services import (
     get_suricata_events,
     get_sophos_events,
@@ -15,9 +14,7 @@ from ..services import (
     calculate_global_stats,
     build_event_type_stats,
     calculate_mitre_stats,
-    calculate_global_attack,
-    calculate_global_attack,
-    build_event_type_ingest
+    calculate_global_attack
 )
 import requests
 import os

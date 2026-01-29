@@ -55,8 +55,7 @@ try:
         http_auth=(ELASTIC_USER, ELASTIC_PASSWORD),
         use_ssl=True,
         verify_certs=False,
-        timeout=300,
-        timeout=5
+        timeout=300
     )
 
     # 🔍 Ping ringan (lebih aman dari authenticate)
