@@ -88,8 +88,8 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
     return False   
 
 
-# @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
-@router.post("/events/filter")
+@router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
+# @router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
     # Langsung panggil fungsi gabungan
     # Elasticsearch melakukan semua filter & search di sisi server
@@ -163,8 +163,8 @@ def get_filtered_events(body: EventRequest):
 #     }
 
 
-# @router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
-@router.post("/events/summary")
+@router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
+# @router.post("/events/summary")
 def get_risk_summary(body: EventRequest):
     try:
         timeframe = body.timeframe

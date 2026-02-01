@@ -882,7 +882,7 @@ def calculate_global_stats(timeframe):
     # Siapkan filter 5 menit lalu
     jakarta_tz = ZoneInfo("Asia/Jakarta")
     now = datetime.now(tz=jakarta_tz)
-    five_min_ago = (now - timedelta(minutes=5)).isoformat()
+    five_min_ago = (now - timedelta(minutes=1)).isoformat()
 
     query = {
         "size": 0,
@@ -1330,7 +1330,7 @@ def build_event_type_stats(timeframe):
             results.append({
                 "event_type": mod,
                 "total": data.get("doc_count", 0),
-                "list": [
+                "timeline": [
                     {
                         "timeline": tb.get("key_as_string"),
                         "count": tb.get("doc_count", 0)
