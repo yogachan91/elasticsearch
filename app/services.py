@@ -107,8 +107,8 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
     # Catatan: exists source.ip sengaja tetap ada sesuai codingan Anda
     base_filters = [
         {"range": {"@timestamp": {"gte": gte, "lte": lte, "time_zone": "+07:00"}}},
-        {"terms": {"event.module": ["suricata", "sophos", "panw"]}},
-        {"exists": {"field": "source.ip"}}
+        {"terms": {"event.module": ["suricata", "sophos", "panw"]}}
+        # {"exists": {"field": "source.ip"}}
     ]
 
     dynamic_filters = []
@@ -284,15 +284,24 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
         src = h["_source"]
 
         # --- LOGIKA PARSING KHUSUS SOPHOS (Parsing message string) ---
-    message_raw = src.get("message", "")
-    parsed_msg = {}
+        message_raw = src.get("message", "")
+        parsed_msg = {}
+
+        # Ambil data event/dataset untuk pengecekan dan pembersihan
+        event_info = src.get("event", {})
+        raw_dataset = event_info.get("dataset", "")
+        raw_module = event_info.get("module")
     
     # Jika ini adalah log Sophos dan field message berupa string
-    if src.get("event", {}).get("module") == "sophos" and isinstance(message_raw, str):
+        if src.get("event", {}).get("dataset") == "sophos.xg" and isinstance(message_raw, str):
         # Regex ini mencari pola key="value" atau key=value
-        pattern = r'(\w+)=["\']?([^"\'\s]+)["\']?'
-        matches = re.findall(pattern, message_raw)
-        parsed_msg = {k: v for k, v in matches}
+            pattern = r'(\w+)=["\']?([^"\'\s]+)["\']?'
+            matches = re.findall(pattern, message_raw)
+            parsed_msg = {k: v for k, v in matches}
+
+        # --- PEMBERSIHAN EVENT TYPE (sophos.xg -> sophos) ---
+        # Jika module ada, pakai module. Jika tidak, ambil dataset lalu split di titik pertama
+        event_type = raw_module or (raw_dataset.split('.')[0] if raw_dataset else "unknown")
 
         severity = (src.get("event", {}).get("severity_label") or 
                     src.get("log", {}).get("level") or 
@@ -317,19 +326,19 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 src.get("panw", {}).get("panos", {}).get("threat", {}).get("name"))
 
         results.append({
-            "timestamp": src.get("@timestamp"),
-            "event_type": src.get("event", {}).get("module"),
-            "source_ip": src.get("source", {}).get("ip"),
-            "destination_ip": src.get("destination", {}).get("ip"),
-            "port": src.get("destination", {}).get("port") or src.get("dst_port") or src.get("dest_port"),
-            "protocol": src.get("network", {}).get("transport"),
-            "country": src.get("source", {}).get("geo", {}).get("country_name"),
-            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
+            "timestamp": src.get("@timestamp") or parsed_msg.get("timestamp"),
+            "event_type": src.get("event", {}).get("module") or event_type,
+            "source_ip": src.get("source", {}).get("ip") or parsed_msg.get("src_ip"),
+            "destination_ip": src.get("destination", {}).get("ip") or parsed_msg.get("dst_ip"),
+            "port": src.get("destination", {}).get("port") or src.get("dst_port") or src.get("dest_port") or parsed_msg.get("dst_port"),
+            "protocol": src.get("network", {}).get("transport") or parsed_msg.get("protocol"),
+            "country": src.get("source", {}).get("geo", {}).get("country_name") or parsed_msg.get("src_country"),
+            "destination_country": src.get("destination", {}).get("geo", {}).get("country_name") or parsed_msg.get("dst_country"),
             "severity": severity,
             "mitre_stages": mitre_value,
             "description": desc,
-            "sub_type": src.get("rule", {}).get("category") or src.get("log_type") or src.get("sub_type"),
-            "event_id": src.get("log", {}).get("id", {}).get("uid") or src.get("seqno"),
+            "sub_type": src.get("rule", {}).get("category") or src.get("log_type") or src.get("sub_type") or parsed_msg.get("log_subtype"),
+            "event_id": src.get("log", {}).get("id", {}).get("uid") or src.get("seqno") or parsed_msg.get("log_id"),
             "source_longitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
             "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
             "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),

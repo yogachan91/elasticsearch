@@ -89,7 +89,7 @@ def evaluate_condition(event: dict, f: FilterItem) -> bool:
 
 
 @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
-# @router.post("/events/filter")
+#@router.post("/events/filter")
 def get_filtered_events(body: EventRequest):
     # Langsung panggil fungsi gabungan
     # Elasticsearch melakukan semua filter & search di sisi server
