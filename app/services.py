@@ -89,7 +89,7 @@ def get_time_range_for_stats(timeframe: str):
 
     return start, now
 
-def get_combined_events(es, timeframe, filters=None, search_query=None):
+def get_combined_events(es, timeframe, filters=None, search_query=None, logic="AND"):
     # Pattern index gabungan
     index_pattern = "logs-*, .ds-logs-suricata*, .ds-logs-sophos*, .ds-logs-panw.panos-default-*"
     
@@ -104,101 +104,229 @@ def get_combined_events(es, timeframe, filters=None, search_query=None):
         gte, lte = "now-30d/d", "now"
 
     # 2. Filter Dasar (Wajib)
-    must_filters = [
+    # Catatan: exists source.ip sengaja tetap ada sesuai codingan Anda
+    base_filters = [
         {"range": {"@timestamp": {"gte": gte, "lte": lte, "time_zone": "+07:00"}}},
         {"terms": {"event.module": ["suricata", "sophos", "panw"]}},
         {"exists": {"field": "source.ip"}}
     ]
 
-    # 3. Logika Filter Pencarian Kolom (Mapping Dinamis)
+    dynamic_filters = []
+
+    # 3. Logika Filter Pencarian Kolom (Mapping Dinamis & Operator)
     if filters:
         for f in filters:
             field = f.field
             val = f.value
+            op = getattr(f, 'operator', 'is') # Default ke 'is' jika operator tidak ada
             
-            if field == "severity":
-                # Handle 3 cara penulisan severity di 3 vendor berbeda
-                must_filters.append({"bool": {"should": [
-                    {"term": {"event.severity_label": val}},
-                    {"term": {"log.level": val}},
-                    {"term": {"log.syslog.severity.name": val}}
-                ], "minimum_should_match": 1}})
-            elif field == "mitre_stages":
-                # Handle perbedaan field MITRE
-                must_filters.append({"bool": {"should": [
-                    {"term": {"rule.metadata.mitre_tactic_name": val}},
-                    {"term": {"mitre.stages": val}}
-                ], "minimum_should_match": 1}})
-            elif field == "source_ip":
-                must_filters.append({"bool": {"should": [
-                    {"term": {"source.ip": val}}
-                ], "minimum_should_match": 1}})
-            elif field == "destination_ip":
-                must_filters.append({"bool": {"should": [
-                    {"term": {"destination.ip": val}}
-                ], "minimum_should_match": 1}})
-            elif field == "event_type":
-                must_filters.append({"term": {"event.module": val}})
-            else:
-                # Field standar ECS (source.ip, destination.ip, dll)
-                must_filters.append({"term": {field: val}})
+            clause = None
 
-    # 4. Logika Search Bar (Mencari di banyak field sekaligus)
+            # --- A. LOGIKA MAPPING FIELD ---
+            if field == "severity":
+                target_fields = ["event.severity_label", "log.level", "log.syslog.severity.name"]
+            elif field == "mitre_stages":
+                mitre_mapping = {
+                    "Initial Attempts": ["Initial", "Reconnaissance"],
+                    "Persistent Foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
+                    "Exploration": ["Defense", "Credential", "Discovery", "Command"],
+                    "Propagation": ["Lateral"],
+                    "Exfiltration": ["Collection", "Exfiltration", "Impact"]
+                }
+                prefixes = mitre_mapping.get(val, [val.lower()])
+                # Khusus MITRE menggunakan prefix logic
+                clause = {
+                    "bool": {
+                        "should": [{"prefix": {"rule.metadata.mitre_tactic_name": p}} for p in prefixes] + 
+                                  [{"prefix": {"mitre.stages": p}} for p in prefixes],
+                        "minimum_should_match": 1
+                    }
+                }
+            elif field == "source_ip":
+                target_fields = ["source.ip"]
+            elif field == "destination_ip":
+                target_fields = ["destination.ip"]
+            elif field == "country":
+                target_fields = ["source.geo.country_name"]
+            elif field == "destination_country":
+                target_fields = ["destination.geo.country_name"]
+            elif field == "event_type":
+                val_l = val.lower()
+                dataset_val = "sophos.xg" if val_l == "sophos" else ("panw.panos" if val_l == "panw" else val_l)
+                target_fields = ["event.module", "event.dataset"]
+                val = dataset_val # Update nilai untuk term query
+            elif field == "protocol":
+                target_fields = ["network.transport"]
+            elif field == "port":
+                target_fields = ["destination.port", "dst_port", "dest.port"]
+            else:
+                target_fields = [field]
+
+            # --- B. LOGIKA OPERATOR (is, is_not, contains, exists, >, <) ---
+            if not clause:
+                if op == "is":
+                    clause = {"bool": {"should": [{"term": {tf: val}} for tf in target_fields], "minimum_should_match": 1}}
+                elif op == "is_not":
+                    clause = {"bool": {"must_not": [{"term": {tf: val}} for tf in target_fields]}}
+                elif op == "contains":
+                    # Wildcard biasanya butuh .keyword untuk field text/ip
+                    clause = {"bool": {"should": [{"wildcard": {f"{tf}.keyword": f"*{val}*"}} for tf in target_fields], "minimum_should_match": 1}}
+                elif op == "exists":
+                    clause = {"bool": {"should": [{"exists": {"field": tf}} for tf in target_fields], "minimum_should_match": 1}}
+                elif op == "greater_than":
+                    clause = {"bool": {"should": [{"range": {tf: {"gt": val}}} for tf in target_fields], "minimum_should_match": 1}}
+                elif op == "less_than":
+                    clause = {"bool": {"should": [{"range": {tf: {"lt": val}}} for tf in target_fields], "minimum_should_match": 1}}
+
+            if clause:
+                dynamic_filters.append(clause)
+
+    # 4. Menggabungkan Filter dengan Logic (AND / OR)
+    if logic.upper() == "OR" and dynamic_filters:
+        # Kita bongkar 'clause' agar tidak double-nesting
+        # Ini memastikan kriteria dibaca: (Base) AND (Filter1 OR Filter2 OR Filter3)
+        flattened_filters = []
+        for d_filter in dynamic_filters:
+            # Jika d_filter adalah bool should, kita ambil isinya saja
+            if "bool" in d_filter and "should" in d_filter["bool"]:
+                flattened_filters.extend(d_filter["bool"]["should"])
+            else:
+                flattened_filters.append(d_filter)
+
+        final_query = {
+            "bool": {
+                "filter": base_filters,
+                "should": flattened_filters,
+                "minimum_should_match": 1
+            }
+        }
+    else:
+        # LOGIKA AND: Tetap menggunakan filter (lebih cepat dan pasti)
+        final_query = {
+            "bool": {
+                "filter": base_filters + dynamic_filters
+            }
+        }
+
+    # 5. Logika Search Bar (Sama seperti codingan Anda, jangan ada yang dihapus)
     if search_query:
-        must_filters.append({
-            "multi_match": {
-                "query": search_query,
-                "fields": [
-                    "source.ip", "destination.ip", 
-                    "source.geo.country_name", "destination.geo.country_name",
-                    "event.module", "network.transport", "event.severity_label"
-                ],
-                "type": "phrase_prefix"
+        search_should_filters = []
+        
+        # --- A. Logika IP (Tetap Sama) ---
+        if any(char.isdigit() for char in search_query):
+            if search_query.count('.') < 3:
+                search_should_filters.append({"wildcard": {"source.ip.keyword": f"{search_query}*"}})
+                search_should_filters.append({"wildcard": {"destination.ip.keyword": f"{search_query}*"}})
+            else:
+                search_should_filters.append({"match": {"source.ip": search_query}})
+                search_should_filters.append({"match": {"destination.ip": search_query}})
+        
+        # --- B. Logika Khusus Mapping MITRE untuk Search Bar ---
+        mitre_mapping = {
+            "Initial Attempts": ["Initial", "Reconnaissance"],
+            "Persistent Foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "Exploration": ["Defense", "Credential", "Discovery", "Command"],
+            "Propagation": ["Lateral"],
+            "Exfiltration": ["Collection", "Exfiltration", "Impact"]
+        }
+
+        # Jika search_query cocok dengan kategori MITRE
+        if search_query in mitre_mapping:
+            prefixes = mitre_mapping[search_query]
+            for p in prefixes:
+                # Gunakan prefix query agar mencari kata depan (case-insensitive tergantung mapping ES)
+                search_should_filters.append({"prefix": {"rule.metadata.mitre_tactic_name": p}})
+                search_should_filters.append({"prefix": {"mitre.stages": p}})
+        else:
+            # Jika bukan kategori MITRE, gunakan match standar (seperti codingan lama Anda)
+            search_should_filters.append({"match": {"rule.metadata.mitre_tactic_name": search_query}})
+            search_should_filters.append({"match": {"mitre.stages": search_query}})
+
+        # --- C. Logika Pencarian Teks Lainnya (Tetap Sama) ---
+        search_should_filters.extend([
+            {"match": {"event.severity_label": search_query}},
+            {"match": {"log.level": search_query}},
+            {"match": {"log.syslog.severity.name": search_query}},
+            {"match": {"event.module": search_query}},
+            {"match": {"event.dataset": search_query}},
+            {"match": {"source.geo.country_name": search_query}},
+            {"match": {"destination.geo.country_name": search_query}},
+            {"term": {"network.transport": search_query.upper()}},
+            # {"match": {"destination.port": search_query}},
+            {"match": {"rule.name": search_query}},
+        ])
+
+        # PENTING: Bungkus ke dalam final_query
+        if "must" not in final_query["bool"]:
+            final_query["bool"]["must"] = []
+        
+        final_query["bool"]["must"].append({
+            "bool": {
+                "should": search_should_filters,
+                "minimum_should_match": 1
             }
         })
 
-    # 5. Eksekusi Query ke Elasticsearch
+    # 6. Eksekusi Query
     query = {
         "size": 500,
         "track_total_hits": True,
-        "query": {"bool": {"filter": must_filters}},
+        "query": final_query,
         "sort": [{"@timestamp": {"order": "desc"}}]
     }
 
     res = es.search(index=index_pattern, body=query)
     hits = res.get("hits", {}).get("hits", [])
     
-    # 6. Universal Mapper (Menyatukan Output JSON)
+    # 7. Universal Mapper (Sama persis seperti codingan Anda)
     results = []
     for h in hits:
         src = h["_source"]
-        
-        # Ekstraksi field yang lokasinya berbeda-beda di tiap vendor
+
+        # --- LOGIKA PARSING KHUSUS SOPHOS (Parsing message string) ---
+    message_raw = src.get("message", "")
+    parsed_msg = {}
+    
+    # Jika ini adalah log Sophos dan field message berupa string
+    if src.get("event", {}).get("module") == "sophos" and isinstance(message_raw, str):
+        # Regex ini mencari pola key="value" atau key=value
+        pattern = r'(\w+)=["\']?([^"\'\s]+)["\']?'
+        matches = re.findall(pattern, message_raw)
+        parsed_msg = {k: v for k, v in matches}
+
         severity = (src.get("event", {}).get("severity_label") or 
                     src.get("log", {}).get("level") or 
-                    src.get("log", {}).get("syslog", {}).get("severity", {}).get("name"))
+                    src.get("log", {}).get("syslog", {}).get("severity", {}).get("name") or
+                    parsed_msg.get("severity")) # Ambil dari parsing jika ES kosong
 
         mitre_raw = src.get("rule", {}).get("metadata", {}).get("mitre_tactic_name", [])
-        if not mitre_raw: 
-            mitre_raw = src.get("mitre", {}).get("stages", [])
+        if not mitre_raw: mitre_raw = src.get("mitre", {}).get("stages", [])
 
-        # Ambil deskripsi/rule name
+        mitre_value = None
+        if mitre_raw:
+            raw_mitre = mitre_raw[0].strip()
+            if raw_mitre.startswith(("Initial", "Reconnaissance")): mitre_value = "Initial Attempts"
+            elif raw_mitre.startswith(("Execution", "Persistence", "Privilege", "Escalation")): mitre_value = "Persistent Foothold"
+            elif raw_mitre.startswith(("Defense", "Credential", "Discovery", "Command")): mitre_value = "Exploration"
+            elif raw_mitre.startswith("Lateral"): mitre_value = "Propagation"
+            elif raw_mitre.startswith(("Collection", "Exfiltration", "Impact")): mitre_value = "Exfiltration"
+            else: mitre_value = mitre_raw[0]
+
         desc = (src.get("rule", {}).get("name") or 
                 src.get("sophos", {}).get("xg", {}).get("message") or 
                 src.get("panw", {}).get("panos", {}).get("threat", {}).get("name"))
 
-        # Mapping ke format final
         results.append({
             "timestamp": src.get("@timestamp"),
             "event_type": src.get("event", {}).get("module"),
             "source_ip": src.get("source", {}).get("ip"),
             "destination_ip": src.get("destination", {}).get("ip"),
-            "port": src.get("destination", {}).get("port") or src.get("sophos", {}).get("xg", {}).get("dst_port"),
+            "port": src.get("destination", {}).get("port") or src.get("dst_port") or src.get("dest_port"),
             "protocol": src.get("network", {}).get("transport"),
             "country": src.get("source", {}).get("geo", {}).get("country_name"),
             "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
             "severity": severity,
-            "mitre_stages": mitre_raw[0] if isinstance(mitre_raw, list) and mitre_raw else mitre_raw,
+            "mitre_stages": mitre_value,
             "description": desc,
             "sub_type": src.get("rule", {}).get("category") or src.get("log_type") or src.get("sub_type"),
             "event_id": src.get("log", {}).get("id", {}).get("uid") or src.get("seqno"),
@@ -206,6 +334,7 @@ def get_combined_events(es, timeframe, filters=None, search_query=None):
             "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
             "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
             "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat"),
+            "application": "application"
         })
         
     return results
