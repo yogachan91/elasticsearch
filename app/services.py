@@ -318,6 +318,7 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
             elif raw_mitre.startswith(("Execution", "Persistence", "Privilege", "Escalation")): mitre_value = "Persistent Foothold"
             elif raw_mitre.startswith(("Defense", "Credential", "Discovery", "Command")): mitre_value = "Exploration"
             elif raw_mitre.startswith("Lateral"): mitre_value = "Propagation"
+            elif raw_mitre.startswith("U"): mitre_value = "Unmapped"
             elif raw_mitre.startswith(("Collection", "Exfiltration", "Impact")): mitre_value = "Exfiltration"
             else: mitre_value = mitre_raw[0]
 
