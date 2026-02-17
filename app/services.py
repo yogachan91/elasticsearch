@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 import os
 import math
 import re
+import json
+import copy
 
 INDEX = os.getenv("ELASTIC_INDEX")
 INDEX_PANW = ".ds-logs-panw.panos-default-*"
@@ -121,10 +123,13 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
             op = getattr(f, 'operator', 'is') # Default ke 'is' jika operator tidak ada
             
             clause = None
+            target_fields = []
+            sophos_extra_filter = None
 
             # --- A. LOGIKA MAPPING FIELD ---
             if field == "severity":
-                target_fields = ["event.severity_label", "log.level", "log.syslog.severity.name"]
+                target_fields = ["event.severity_label", "log.syslog.severity.name"]
+                sophos_extra_filter = {"match_phrase": {"message": f"severity=\"{val}\""}}
             elif field == "mitre_stages":
                 mitre_mapping = {
                     "Initial Attempts": ["Initial", "Reconnaissance"],
@@ -144,12 +149,17 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 }
             elif field == "source_ip":
                 target_fields = ["source.ip"]
+                # Tambahkan logika khusus untuk mencari teks src_ip di dalam message
+                sophos_extra_filter = {"match_phrase": {"message": f"src_ip=\"{val}\""}}
             elif field == "destination_ip":
                 target_fields = ["destination.ip"]
+                sophos_extra_filter = {"match_phrase": {"message": f"dst_ip=\"{val}\""}}
             elif field == "country":
                 target_fields = ["source.geo.country_name"]
+                sophos_extra_filter = {"match_phrase": {"message": f"src_country=\"{val}\""}}
             elif field == "destination_country":
                 target_fields = ["destination.geo.country_name"]
+                sophos_extra_filter = {"match_phrase": {"message": f"dst_country=\"{val}\""}}
             elif field == "event_type":
                 val_l = val.lower()
                 dataset_val = "sophos.xg" if val_l == "sophos" else ("panw.panos" if val_l == "panw" else val_l)
@@ -157,24 +167,56 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 val = dataset_val # Update nilai untuk term query
             elif field == "protocol":
                 target_fields = ["network.transport"]
+                sophos_extra_filter = {"match_phrase": {"message": f"protocol=\"{val}\""}}
             elif field == "port":
                 target_fields = ["destination.port", "dst_port", "dest.port"]
+                sophos_extra_filter = {"match_phrase": {"message": f"dst_port={val}"}}
             else:
                 target_fields = [field]
 
             # --- B. LOGIKA OPERATOR (is, is_not, contains, exists, >, <) ---
+            # if not clause:
+            #     if op == "is":
+            #         clause = {"bool": {"should": [{"term": {tf: val}} for tf in target_fields], "minimum_should_match": 1}}
+            #     elif op == "is_not":
+            #         clause = {"bool": {"must_not": [{"term": {tf: val}} for tf in target_fields]}}
+            #     elif op == "contains":
+            #         # Wildcard biasanya butuh .keyword untuk field text/ip
+            #         clause = {"bool": {"should": [{"wildcard": {f"{tf}.keyword": f"*{val}*"}} for tf in target_fields], "minimum_should_match": 1}}
+            #     elif op == "exists":
+            #         clause = {"bool": {"should": [{"exists": {"field": tf}} for tf in target_fields], "minimum_should_match": 1}}
+            #     elif op == "greater_than":
+            #         clause = {"bool": {"should": [{"range": {tf: {"gt": val}}} for tf in target_fields], "minimum_should_match": 1}}
+            #     elif op == "less_than":
+            #         clause = {"bool": {"should": [{"range": {tf: {"lt": val}}} for tf in target_fields], "minimum_should_match": 1}}
+
             if not clause:
                 if op == "is":
-                    clause = {"bool": {"should": [{"term": {tf: val}} for tf in target_fields], "minimum_should_match": 1}}
+                    should_list = [{"term": {tf: val}} for tf in target_fields]
+                    if sophos_extra_filter: should_list.append(sophos_extra_filter)
+                    clause = {"bool": {"should": should_list, "minimum_should_match": 1}}
+                    
                 elif op == "is_not":
-                    clause = {"bool": {"must_not": [{"term": {tf: val}} for tf in target_fields]}}
+                    must_not_list = [{"term": {tf: val}} for tf in target_fields]
+                    if sophos_extra_filter:
+                        must_not_list.append(sophos_extra_filter)
+                        
+                    clause = {"bool": {"must_not": must_not_list}}
+                    
                 elif op == "contains":
-                    # Wildcard biasanya butuh .keyword untuk field text/ip
-                    clause = {"bool": {"should": [{"wildcard": {f"{tf}.keyword": f"*{val}*"}} for tf in target_fields], "minimum_should_match": 1}}
+                    should_list = [{"wildcard": {f"{tf}.keyword": f"*{val}*"}} for tf in target_fields]
+                    # Untuk contains, kita gunakan match biasa pada message agar lebih fleksibel
+                    if sophos_extra_filter:
+                        should_list.append({"match": {"message": val}})
+                        
+                    clause = {"bool": {"should": should_list, "minimum_should_match": 1}}
+                    
                 elif op == "exists":
                     clause = {"bool": {"should": [{"exists": {"field": tf}} for tf in target_fields], "minimum_should_match": 1}}
+                    
                 elif op == "greater_than":
                     clause = {"bool": {"should": [{"range": {tf: {"gt": val}}} for tf in target_fields], "minimum_should_match": 1}}
+                    
                 elif op == "less_than":
                     clause = {"bool": {"should": [{"range": {tf: {"lt": val}}} for tf in target_fields], "minimum_should_match": 1}}
 
@@ -182,31 +224,29 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 dynamic_filters.append(clause)
 
     # 4. Menggabungkan Filter dengan Logic (AND / OR)
-    if logic.upper() == "OR" and dynamic_filters:
-        # Kita bongkar 'clause' agar tidak double-nesting
-        # Ini memastikan kriteria dibaca: (Base) AND (Filter1 OR Filter2 OR Filter3)
-        flattened_filters = []
-        for d_filter in dynamic_filters:
-            # Jika d_filter adalah bool should, kita ambil isinya saja
-            if "bool" in d_filter and "should" in d_filter["bool"]:
-                flattened_filters.extend(d_filter["bool"]["should"])
-            else:
-                flattened_filters.append(d_filter)
+    print(f"DEBUG: Nilai variabel logic yang diterima fungsi adalah: '{logic}'")
 
+    # Kita bersihkan variabel logic dari spasi dan paksa huruf besar
+    logic_type = str(logic).strip().upper() if logic else "AND"
+
+    if logic_type == "OR" and dynamic_filters:
+        # STRUKTUR INI AKAN MENGHASILKAN: (Waktu & Module) AND (IP OR Country)
         final_query = {
             "bool": {
-                "filter": base_filters,
-                "should": flattened_filters,
-                "minimum_should_match": 1
+                "filter": base_filters,     # Wajib cocok (Time & Module)
+                "should": dynamic_filters,  # Salah satu boleh (IP, Country, dll)
+                "minimum_should_match": 1   # Syarat agar 'should' bertindak sebagai OR
             }
         }
+        print("DEBUG: Menggunakan logika OR (Should)")
     else:
-        # LOGIKA AND: Tetap menggunakan filter (lebih cepat dan pasti)
+        # STRUKTUR INI AKAN MENGHASILKAN: Waktu AND Module AND IP AND Country
         final_query = {
             "bool": {
                 "filter": base_filters + dynamic_filters
             }
         }
+        print("DEBUG: Menggunakan logika AND (Filter Array)")
 
     # 5. Logika Search Bar (Sama seperti codingan Anda, jangan ada yang dihapus)
     if search_query:
@@ -268,15 +308,57 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
         })
 
     # 6. Eksekusi Query
-    query = {
-        "size": 500,
-        "track_total_hits": True,
-        "query": final_query,
-        "sort": [{"@timestamp": {"order": "desc"}}]
-    }
+    # query = {
+    #     "size": 500,
+    #     "track_total_hits": True,
+    #     "query": final_query,
+    #     "sort": [{"@timestamp": {"order": "desc"}}]
+    # }
 
-    res = es.search(index=index_pattern, body=query)
-    hits = res.get("hits", {}).get("hits", [])
+    # res = es.search(index=index_pattern, body=query)
+    # hits = res.get("hits", {}).get("hits", [])
+    modules = ["suricata", "sophos", "panw"]
+    per_module_limit = 100
+    all_hits = []
+    
+    msearch_body = []
+    for mod in modules:
+        mod_query = copy.deepcopy(final_query)
+        
+        # Override filter module
+        if "filter" in mod_query["bool"]:
+            mod_query["bool"]["filter"] = [
+                f for f in mod_query["bool"]["filter"] 
+                if not (isinstance(f, dict) and "terms" in f and "event.module" in f["terms"])
+            ]
+            mod_query["bool"]["filter"].append({"term": {"event.module": mod}})
+        
+        # Header msearch (index mana yang dituju)
+        msearch_body.append({"index": index_pattern})
+        # Body msearch
+        msearch_body.append({
+            "size": per_module_limit,
+            "query": mod_query,
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "timeout": "30s" # Beri limit tiap sub-query agar tidak gantung
+        })
+
+    try:
+        # Eksekusi semua query sekaligus secara paralel
+        responses = es.msearch(body=msearch_body)
+        for res in responses.get("responses", []):
+            if "hits" in res:
+                all_hits.extend(res["hits"].get("hits", []))
+            else:
+                # Log jika salah satu module error (misal timeout) tanpa mematikan module lain
+                print(f"DEBUG: One module failed: {res.get('error', 'Unknown error')}")
+                
+    except Exception as e:
+        print(f"Msearch Global Error: {e}")
+
+    # Sortir hasil gabungan
+    all_hits.sort(key=lambda x: x["_source"].get("@timestamp", ""), reverse=True)
+    hits = all_hits
     
     # 7. Universal Mapper (Sama persis seperti codingan Anda)
     results = []

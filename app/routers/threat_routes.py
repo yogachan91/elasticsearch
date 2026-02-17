@@ -97,7 +97,8 @@ def get_filtered_events(body: EventRequest):
         es=es, 
         timeframe=body.timeframe, 
         filters=body.filters, 
-        search_query=body.search_query
+        search_query=body.search_query,
+        logic=body.operator_logic
     )
 
     return {
