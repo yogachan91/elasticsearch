@@ -171,11 +171,11 @@ def get_risk_summary(body: EventRequest):
         timeframe = body.timeframe
         elastic_status = get_elastic_status()
 
-        suricata = get_suricata_events(es, INDEX, timeframe) or []
-        sophos = get_sophos_events(es, INDEX, timeframe) or []
-        panw = get_panw_events(es, INDEX_PANW, timeframe) or []
+        # suricata = get_suricata_events(es, INDEX, timeframe) or []
+        # sophos = get_sophos_events(es, INDEX, timeframe) or []
+        # panw = get_panw_events(es, INDEX_PANW, timeframe) or []
 
-        combined = suricata + sophos + panw
+        # combined = suricata + sophos + panw
 
         summary = calculate_risk_summary(timeframe)
         global_stats = calculate_global_stats(timeframe)
