@@ -409,7 +409,7 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 src.get("panw", {}).get("panos", {}).get("threat", {}).get("name"))
 
         results.append({
-            "timestamp": src.get("@timestamp") or parsed_msg.get("timestamp"),
+            "timestamp": parsed_msg.get("timestamp") or src.get("@timestamp"),
             "event_type": src.get("event", {}).get("module") or event_type,
             "source_ip": src.get("source", {}).get("ip") or parsed_msg.get("src_ip"),
             "destination_ip": src.get("destination", {}).get("ip") or parsed_msg.get("dst_ip"),
@@ -426,7 +426,28 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
             "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
             "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
             "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat"),
-            "application": "application"
+            "application": "application",
+            "rule_reference": src.get("rule", {}).get("reference") or None,
+            "ruleset": src.get("rule", {}).get("ruleset") or None,
+            "rule_action": src.get("rule", {}).get("action") or None,
+            "rule_uuid": src.get("rule", {}).get("uuid") or None,
+            "metadata_update_at": src.get("rule", {}).get("metadata", {}).get("updated_at", []) or None,
+            "metadata_created_at": src.get("rule", {}).get("metadata", {}).get("created_at", []) or None,
+            "metadata_confidence": src.get("rule", {}).get("metadata", {}).get("confidence", []) or None,
+            "metadata_tag": src.get("rule", {}).get("metadata", {}).get("tag", []) or None,
+            "metadata_severity": src.get("rule", {}).get("metadata", {}).get("signature_severity", []) or None,
+            "network_packet_source": src.get("network", {}).get("packet_source") or None,
+            "category": src.get("event", {}).get("category") or None,
+            "device_name": parsed_msg.get("device_name") or None,
+            "device_model": parsed_msg.get("device_model") or None,
+            "device_serial_id": parsed_msg.get("device_serial_id") or None,
+            "log_component": parsed_msg.get("log_component") or None,
+            "log_subtype": parsed_msg.get("log_subtype") or None,
+            "fw_rule_type": parsed_msg.get("fw_rule_type") or None,
+            "ether_type": parsed_msg.get("ether_type") or None,
+            "in_interface": parsed_msg.get("in_interface") or None,
+            "src_mac": parsed_msg.get("src_mac") or None,
+            "in_display_interface": parsed_msg.get("in_display_interface") or None
         })
         
     return results

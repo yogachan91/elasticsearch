@@ -165,7 +165,7 @@ def get_filtered_events(body: EventRequest):
 
 
 @router.post("/events/summary", dependencies=[Depends(verify_internal_access)])
-# @router.post("/events/summary")
+#@router.post("/events/summary")
 def get_risk_summary(body: EventRequest):
     try:
         timeframe = body.timeframe
