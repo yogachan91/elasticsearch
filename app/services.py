@@ -284,28 +284,88 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
 
         # --- C. Logika Pencarian Teks Lainnya (Tetap Sama) ---
         search_should_filters.extend([
-            {"match": {"event.severity_label": search_query}},
-            {"match": {"log.level": search_query}},
-            {"match": {"log.syslog.severity.name": search_query}},
-            {"match": {"event.module": search_query}},
-            {"match": {"event.dataset": search_query}},
-            {"match": {"source.geo.country_name": search_query}},
-            {"match": {"destination.geo.country_name": search_query}},
+            #timestamp (belum bisa)
+            {"wildcard": {"@timestamp.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #event_type
+            {"wildcard": {"event.module": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"event.dataset": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #port
+            {"wildcard": {"destination.port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"dst_port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"dest_port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #protocol
             {"term": {"network.transport": search_query.upper()}},
-            # {"match": {"destination.port": search_query}},
-            {"match": {"rule.name": search_query}},
+            #source_country
+            {"wildcard": {"source.geo.country_name.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #destination_country
+            {"wildcard": {"destination.geo.country_name.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #severity
+            {"wildcard": {"event.severity_label": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log.level": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log.syslog.severity.name": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #description
+            {"wildcard": {"rule.name": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #sub_type
+            {"wildcard": {"rule.category.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log_type.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"sub_type.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #event_id (belum bisa)
+            {"wildcard": {"log.id.uid.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"seqno.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #source_longitude_latitude (belum bisa)
+            {"wildcard": {"source.geo.location.lon.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"source.geo.location.lat.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #destination_longitude_latitude (belum bisa)
+            {"wildcard": {"destination.geo.location.lon.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"destination.geo.location.lat.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            #data_tambahan_suricata
+            {"wildcard": {"rule.refrence.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.ruleset.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.action.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.uuid.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.metadata.update_at.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.metadata.created_at.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.metadata.confidence.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.metadata.tag.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"rule.metadata.signature_severity.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"network.packet_source.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
+            {"wildcard": {"event.category.signature_severity.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
         ])
+        # search_should_filters.extend([
+        #     {"match": {"event.severity_label": search_query}},
+        #     {"match": {"log.level": search_query}},
+        #     {"match": {"log.syslog.severity.name": search_query}},
+        #     {"match": {"event.module": search_query}},
+        #     {"match": {"event.dataset": search_query}},
+        #     {"match": {"source.geo.country_name": search_query}},
+        #     {"match": {"destination.geo.country_name": search_query}},
+        #     {"term": {"network.transport": search_query.upper()}},
+        #     # {"match": {"destination.port": search_query}},
+        #     {"match": {"rule.name": search_query}},
+        # ])
 
         # PENTING: Bungkus ke dalam final_query
+        if "bool" not in final_query:
+            final_query["bool"] = {}
+        
         if "must" not in final_query["bool"]:
             final_query["bool"]["must"] = []
-        
+    
         final_query["bool"]["must"].append({
             "bool": {
                 "should": search_should_filters,
                 "minimum_should_match": 1
             }
         })
+        # if "must" not in final_query["bool"]:
+        #     final_query["bool"]["must"] = []
+        
+        # final_query["bool"]["must"].append({
+        #     "bool": {
+        #         "should": search_should_filters,
+        #         "minimum_should_match": 1
+        #     }
+        # })
 
     # 6. Eksekusi Query
     # query = {
