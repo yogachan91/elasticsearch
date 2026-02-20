@@ -251,15 +251,20 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
     # 5. Logika Search Bar (Sama seperti codingan Anda, jangan ada yang dihapus)
     if search_query:
         search_should_filters = []
+
+        query_map = {
+        "sophos": "sophos.xg",
+        }
+        mapped_query = query_map.get(search_query.lower(), search_query)
         
         # --- A. Logika IP (Tetap Sama) ---
         if any(char.isdigit() for char in search_query):
             if search_query.count('.') < 3:
-                search_should_filters.append({"wildcard": {"source.ip.keyword": f"{search_query}*"}})
-                search_should_filters.append({"wildcard": {"destination.ip.keyword": f"{search_query}*"}})
+                search_should_filters.append({"wildcard": {"source.ip.keyword": f"{mapped_query}*"}})
+                search_should_filters.append({"wildcard": {"destination.ip.keyword": f"{mapped_query}*"}})
             else:
-                search_should_filters.append({"match": {"source.ip": search_query}})
-                search_should_filters.append({"match": {"destination.ip": search_query}})
+                search_should_filters.append({"match": {"source.ip": mapped_query}})
+                search_should_filters.append({"match": {"destination.ip": mapped_query}})
         
         # --- B. Logika Khusus Mapping MITRE untuk Search Bar ---
         mitre_mapping = {
@@ -271,7 +276,7 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
         }
 
         # Jika search_query cocok dengan kategori MITRE
-        if search_query in mitre_mapping:
+        if mapped_query in mitre_mapping:
             prefixes = mitre_mapping[search_query]
             for p in prefixes:
                 # Gunakan prefix query agar mencari kata depan (case-insensitive tergantung mapping ES)
@@ -279,57 +284,58 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                 search_should_filters.append({"prefix": {"mitre.stages": p}})
         else:
             # Jika bukan kategori MITRE, gunakan match standar (seperti codingan lama Anda)
-            search_should_filters.append({"match": {"rule.metadata.mitre_tactic_name": search_query}})
-            search_should_filters.append({"match": {"mitre.stages": search_query}})
+            search_should_filters.append({"match": {"rule.metadata.mitre_tactic_name": mapped_query}})
+            search_should_filters.append({"match": {"mitre.stages": mapped_query}})
 
         # --- C. Logika Pencarian Teks Lainnya (Tetap Sama) ---
         search_should_filters.extend([
+            {"wildcard": {"message": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #timestamp (belum bisa)
-            {"wildcard": {"@timestamp.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"@timestamp.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #event_type
-            {"wildcard": {"event.module": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"event.dataset": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"event.module": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"event.dataset": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #port
-            {"wildcard": {"destination.port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"dst_port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"dest_port.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"destination.port.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"dst_port.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"dest_port.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #protocol
-            {"term": {"network.transport": search_query.upper()}},
+            {"term": {"network.transport": mapped_query.upper()}},
             #source_country
-            {"wildcard": {"source.geo.country_name.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"source.geo.country_name.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #destination_country
-            {"wildcard": {"destination.geo.country_name.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"destination.geo.country_name.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #severity
-            {"wildcard": {"event.severity_label": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"log.level": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"log.syslog.severity.name": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"event.severity_label": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log.level": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log.syslog.severity.name": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #description
-            {"wildcard": {"rule.name": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.name": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #sub_type
-            {"wildcard": {"rule.category.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"log_type.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"sub_type.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.category.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log_type.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"sub_type.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #event_id (belum bisa)
-            {"wildcard": {"log.id.uid.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"seqno.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"log.id.uid.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"seqno.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #source_longitude_latitude (belum bisa)
-            {"wildcard": {"source.geo.location.lon.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"source.geo.location.lat.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"source.geo.location.lon": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"source.geo.location.lat": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #destination_longitude_latitude (belum bisa)
-            {"wildcard": {"destination.geo.location.lon.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"destination.geo.location.lat.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"destination.geo.location.lon.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"destination.geo.location.lat.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #data_tambahan_suricata
-            {"wildcard": {"rule.refrence.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"rule.ruleset.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.action.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.uuid.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.metadata.update_at.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.metadata.created_at.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.metadata.confidence.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
-            {"wildcard": {"rule.metadata.tag.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"rule.metadata.signature_severity.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"network.packet_source.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}}, #belum_bisa
-            {"wildcard": {"event.category.signature_severity.keyword": {"value": f"*{search_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.refrence.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.ruleset": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.action": {"value": f"*{mapped_query}*", "case_insensitive": True}}}, 
+            {"wildcard": {"rule.uuid": {"value": f"*{mapped_query}*", "case_insensitive": True}}}, 
+            {"wildcard": {"rule.metadata.update_at": {"value": f"*{mapped_query}*", "case_insensitive": True}}}, 
+            {"wildcard": {"rule.metadata.created_at": {"value": f"*{mapped_query}*", "case_insensitive": True}}}, 
+            {"wildcard": {"rule.metadata.confidence": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"rule.metadata.tag": {"value": f"*{mapped_query}*", "case_insensitive": True}}}, 
+            {"wildcard": {"rule.metadata.signature_severity": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"network.packet_source": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"wildcard": {"event.category.signature_severity": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
         ])
         # search_should_filters.extend([
         #     {"match": {"event.severity_label": search_query}},
