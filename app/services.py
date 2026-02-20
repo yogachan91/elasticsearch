@@ -269,10 +269,23 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
         # --- B. Logika Khusus Mapping MITRE untuk Search Bar ---
         mitre_mapping = {
             "Initial Attempts": ["Initial", "Reconnaissance"],
+            "initial attempts": ["Initial", "Reconnaissance"],
+            "Initial": ["Initial", "Reconnaissance"],
+            "initial": ["Initial", "Reconnaissance"],
+            "Attempts": ["Initial", "Reconnaissance"],
+            "attempts": ["Initial", "Reconnaissance"],
             "Persistent Foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "persistent foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "Persistent": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "persistent": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "Foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
+            "foothold": ["Execution", "Persistence", "Privilege", "Escalation"],
             "Exploration": ["Defense", "Credential", "Discovery", "Command"],
+            "exploration": ["Defense", "Credential", "Discovery", "Command"],
             "Propagation": ["Lateral"],
-            "Exfiltration": ["Collection", "Exfiltration", "Impact"]
+            "propagation": ["Lateral"],
+            "Exfiltration": ["Collection", "Exfiltration", "Impact"],
+            "exfiltration": ["Collection", "Exfiltration", "Impact"]
         }
 
         # Jika search_query cocok dengan kategori MITRE
@@ -287,9 +300,24 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
             search_should_filters.append({"match": {"rule.metadata.mitre_tactic_name": mapped_query}})
             search_should_filters.append({"match": {"mitre.stages": mapped_query}})
 
+        if any(char.isdigit() for char in mapped_query) and ("-" in mapped_query or "." in mapped_query):
+             search_should_filters.append({
+                "query_string": {
+                    "fields": [
+                        "source.geo.location.lon", 
+                        "source.geo.location.lat",
+                        "destination.geo.location.lon",
+                        "destination.geo.location.lat"
+                    ],
+                    "query": f"{mapped_query}*" # Query string lebih fleksibel untuk angka
+                }
+            })
+
         # --- C. Logika Pencarian Teks Lainnya (Tetap Sama) ---
         search_should_filters.extend([
             {"wildcard": {"message": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"match": {"message": {"query": mapped_query, "operator": "and"}}},
+            {"match_phrase": {"message": mapped_query}},
             #timestamp (belum bisa)
             {"wildcard": {"@timestamp.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             #event_type
@@ -315,15 +343,19 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
             {"wildcard": {"rule.category.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"log_type.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"sub_type.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
-            #event_id (belum bisa)
+            #event_id
             {"wildcard": {"log.id.uid.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"seqno.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
-            #source_longitude_latitude (belum bisa)
+            #source_longitude_latitude
             {"wildcard": {"source.geo.location.lon": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"source.geo.location.lat": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
-            #destination_longitude_latitude (belum bisa)
+            {"match_phrase": {"source.geo.location.lon": mapped_query}},
+            {"match_phrase": {"source.geo.location.lat": mapped_query}},
+            #destination_longitude_latitude
             {"wildcard": {"destination.geo.location.lon.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"destination.geo.location.lat.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
+            {"match_phrase": {"destination.geo.location.lon": mapped_query}},
+            {"match_phrase": {"destination.geo.location.lat": mapped_query}},
             #data_tambahan_suricata
             {"wildcard": {"rule.refrence.keyword": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
             {"wildcard": {"rule.ruleset": {"value": f"*{mapped_query}*", "case_insensitive": True}}},
