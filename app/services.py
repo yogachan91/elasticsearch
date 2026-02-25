@@ -1794,12 +1794,14 @@ def calculate_global_attack(timeframe):
         hits = res.get("hits", {}).get("hits", [])
         
         summary = {}
+        # Nilai yang akan dibuang
         invalid_values = [None, "Unknown", "unknown", "R1", "r1", ""]
 
         for h in hits:
             src_data = h["_source"]
             msg = src_data.get("message", "")
             
+            # Helper untuk mengambil data dari teks message (Sophos)
             def extract_sophos(key):
                 m = re.search(rf'{key}=[\"]?([^\s\",]+)[\"]?', msg)
                 return m.group(1) if m else None
@@ -1807,19 +1809,23 @@ def calculate_global_attack(timeframe):
             is_sophos = "sophos" in h["_index"]
             event_mod = src_data.get("event", {}).get("module") or src_data.get("event", {}).get("dataset", "")
 
-            # 1. Ambil Nama Negara
+            # Ekstraksi Negara
             country = src_data.get("source", {}).get("geo", {}).get("country_name") or extract_sophos("src_country")
             dest_country = src_data.get("destination", {}).get("geo", {}).get("country_name") or extract_sophos("dst_country")
             
-            # Filter: Buang data tidak valid atau R1
+            # --- LOGIKA FILTER DESTINATION IDN (KHUSUS SOPHOS) ---
+            if is_sophos:
+                if dest_country != "IDN":
+                    continue
+            
+            # --- FILTER UMUM (Hapus R1 / Unknown) ---
             if country in invalid_values or dest_country in invalid_values:
                 continue
             
             group_key = f"{country}|{dest_country}"
             
             if group_key not in summary:
-                # 2. Logika Pengisian Koordinat Otomatis
-                # Coba ambil dari ES dulu, kalau null ambil dari GEO_MAP berdasarkan kode negara
+                # Ambil Koordinat (Prioritas: Elasticsearch > GEO_MAP)
                 s_lon = src_data.get("source", {}).get("geo", {}).get("location", {}).get("lon") or GEO_MAP.get(country, {}).get("lon")
                 s_lat = src_data.get("source", {}).get("geo", {}).get("location", {}).get("lat") or GEO_MAP.get(country, {}).get("lat")
                 d_lon = src_data.get("destination", {}).get("geo", {}).get("location", {}).get("lon") or GEO_MAP.get(dest_country, {}).get("lon")
@@ -1839,6 +1845,7 @@ def calculate_global_attack(timeframe):
             
             summary[group_key]["count"] += 1
 
+        # Sorting berdasarkan count terbanyak
         final_results = list(summary.values())
         final_results.sort(key=lambda x: x['count'], reverse=True)
 
