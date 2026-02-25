@@ -1701,6 +1701,36 @@ def build_event_type_stats(timeframe):
 #     ]
 
 def calculate_global_attack(timeframe):
+
+    GEO_MAP = {
+        "AFG": {"lat": 33.9391, "lon": 67.7100}, "ALB": {"lat": 41.1533, "lon": 20.1683},
+        "DZA": {"lat": 28.0339, "lon": 1.6596}, "ARG": {"lat": -38.4161, "lon": -63.6167},
+        "AUS": {"lat": -25.2744, "lon": 133.7751}, "AUT": {"lat": 47.5162, "lon": 14.5501},
+        "BGD": {"lat": 23.6850, "lon": 90.3563}, "BEL": {"lat": 50.5039, "lon": 4.4699},
+        "BRA": {"lat": -14.2350, "lon": -51.9253}, "CAN": {"lat": 56.1304, "lon": -106.3468},
+        "CHL": {"lat": -35.6751, "lon": -71.5430}, "CHN": {"lat": 35.8617, "lon": 104.1954},
+        "COL": {"lat": 4.5709, "lon": -74.2973}, "DNK": {"lat": 56.2639, "lon": 9.5018},
+        "EGY": {"lat": 26.8206, "lon": 30.8025}, "FRA": {"lat": 46.2276, "lon": 2.2137},
+        "DEU": {"lat": 51.1657, "lon": 10.4515}, "GRC": {"lat": 39.0742, "lon": 21.8243},
+        "HKG": {"lat": 22.3964, "lon": 114.1095}, "IND": {"lat": 20.5937, "lon": 78.9629},
+        "IDN": {"lat": -6.2088, "lon": 106.8456}, "IRN": {"lat": 32.4279, "lon": 53.6880},
+        "IRQ": {"lat": 33.2232, "lon": 43.6793}, "IRL": {"lat": 53.4129, "lon": -8.2439},
+        "ISR": {"lat": 31.0461, "lon": 34.8516}, "ITA": {"lat": 41.8719, "lon": 12.5674},
+        "JPN": {"lat": 36.2048, "lon": 138.2529}, "KOR": {"lat": 35.9078, "lon": 127.7669},
+        "MYS": {"lat": 4.2105, "lon": 101.9758}, "MEX": {"lat": 23.6345, "lon": -102.5528},
+        "NLD": {"lat": 52.1326, "lon": 5.2913}, "NZL": {"lat": -40.9006, "lon": 174.8860},
+        "NGA": {"lat": 9.0820, "lon": 8.6753}, "NOR": {"lat": 60.4720, "lon": 8.4689},
+        "PAK": {"lat": 30.3753, "lon": 69.3451}, "PHL": {"lat": 12.8797, "lon": 121.7740},
+        "POL": {"lat": 51.9194, "lon": 19.1451}, "PRT": {"lat": 39.3999, "lon": -8.2245},
+        "RUS": {"lat": 61.5240, "lon": 105.3188}, "SAU": {"lat": 23.8859, "lon": 45.0792},
+        "SGP": {"lat": 1.3521, "lon": 103.8198}, "ZAF": {"lat": -30.5595, "lon": 22.9375},
+        "ESP": {"lat": 40.4637, "lon": -3.7492}, "SWE": {"lat": 60.1282, "lon": 18.6435},
+        "CHE": {"lat": 46.8182, "lon": 8.2275}, "TWN": {"lat": 23.6978, "lon": 120.9605},
+        "THA": {"lat": 15.8700, "lon": 100.9925}, "TUR": {"lat": 38.9637, "lon": 35.2433},
+        "UKR": {"lat": 48.3794, "lon": 31.1656}, "ARE": {"lat": 23.4241, "lon": 53.8478},
+        "GBR": {"lat": 55.3781, "lon": -3.4360}, "USA": {"lat": 37.0902, "lon": -95.7129},
+        "VNM": {"lat": 14.0583, "lon": 108.2772}, "MCO": {"lat": 43.7384, "lon": 7.4246}
+    }
     # 1. Definisi Index dan Filter Waktu
     index_pattern = "logs-*, .ds-logs-suricata*, .ds-logs-sophos*, .ds-logs-panw.panos-default-*"
     # time_filter = get_time_range_filter(timeframe)
@@ -1722,84 +1752,97 @@ def calculate_global_attack(timeframe):
         gte_time = "now/d"
         lte_time = "now"
 
+    sophos_severity = "Information"
     # 2. Query Elasticsearch
     query = {
-        "size": 5,  # Kita hanya butuh 5 data teratas (sesuai logika sorted_events[:5])
-        "track_total_hits": True,
+        "size": 5000,
         "query": {
             "bool": {
                 "filter": [
-                    {
-                        "range": {
-                            "@timestamp": {
-                                "gte": gte_time,
-                                "lte": lte_time,
-                                "time_zone": "+07:00"
-                            }
-                        }
-                    },
-                    # Filter Modul
-                    {"terms": {"event.module": ["suricata", "sophos", "panw"]}},
-                    # Filter Severity (High & Critical)
-                    {"terms": {"event.severity_label": ["high", "critical", "High", "Critical"]}},
-                    # Filter Field Wajib (TIDAK NULL) - Menggantikan filter manual Python
-                    {"exists": {"field": "source.geo.country_name"}},
-                    {"exists": {"field": "destination.geo.country_name"}},
-                    {"exists": {"field": "source.geo.location"}},
-                    {"exists": {"field": "destination.geo.location"}}
-                ],
-                "must_not": [
-                    # Filter Traffic Internal (192.168.x.x -> 192.168.x.x)
+                    {"range": {"@timestamp": {"gte": gte_time, "lte": lte_time, "time_zone": "+07:00"}}},
                     {
                         "bool": {
-                            "must": [
-                                {"wildcard": {"source.ip": "192.168.*"}},
-                                {"wildcard": {"destination.ip": "192.168.*"}}
-                            ]
+                            "should": [
+                                {
+                                    "bool": {
+                                        "must": [
+                                            {"terms": {"event.module": ["suricata", "panw"]}},
+                                            {"terms": {"event.severity_label": ["high", "critical", "High", "Critical"]}}
+                                        ]
+                                    }
+                                },
+                                {
+                                    "bool": {
+                                        "must": [
+                                            {"wildcard": {"_index": "*sophos*"}},
+                                            {"query_string": {"query": f"message: *{sophos_severity}*", "analyze_wildcard": True}}
+                                        ]
+                                    }
+                                }
+                            ],
+                            "minimum_should_match": 1
                         }
                     }
                 ]
             }
         },
-        "sort": [
-            {"@timestamp": {"order": "desc"}}  # Sorting terbaru langsung dari ES
-        ]
+        "sort": [{"@timestamp": {"order": "desc"}}]
     }
 
     try:
         res = es.search(index=index_pattern, body=query)
         hits = res.get("hits", {}).get("hits", [])
         
-        results = []
+        summary = {}
+        invalid_values = [None, "Unknown", "unknown", "R1", "r1", ""]
+
         for h in hits:
-            src = h["_source"]
+            src_data = h["_source"]
+            msg = src_data.get("message", "")
             
-            # --- Formatting Timestamp ---
-            raw_ts = src.get("@timestamp")
-            formatted_ts = raw_ts
-            if raw_ts:
-                try:
-                    dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
-                    formatted_ts = dt.strftime("%Y-%m-%d %H:%M:%S")
-                except:
-                    pass
+            def extract_sophos(key):
+                m = re.search(rf'{key}=[\"]?([^\s\",]+)[\"]?', msg)
+                return m.group(1) if m else None
 
-            # --- Mapping Data Output ---
-            results.append({
-                "destination_ip": src.get("destination", {}).get("ip"),
-                "source_ip": src.get("source", {}).get("ip"),
-                "country": src.get("source", {}).get("geo", {}).get("country_name"),
-                "destination_country": src.get("destination", {}).get("geo", {}).get("country_name"),
-                "event_type": src.get("event", {}).get("module"),
-                "severity": src.get("event", {}).get("severity_label"),
-                "timestamp": formatted_ts,
-                "source_longitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lon"),
-                "source_latitude": src.get("source", {}).get("geo", {}).get("location", {}).get("lat"),
-                "destination_longitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lon"),
-                "destination_latitude": src.get("destination", {}).get("geo", {}).get("location", {}).get("lat"),
-            })
+            is_sophos = "sophos" in h["_index"]
+            event_mod = src_data.get("event", {}).get("module") or src_data.get("event", {}).get("dataset", "")
 
-        return results
+            # 1. Ambil Nama Negara
+            country = src_data.get("source", {}).get("geo", {}).get("country_name") or extract_sophos("src_country")
+            dest_country = src_data.get("destination", {}).get("geo", {}).get("country_name") or extract_sophos("dst_country")
+            
+            # Filter: Buang data tidak valid atau R1
+            if country in invalid_values or dest_country in invalid_values:
+                continue
+            
+            group_key = f"{country}|{dest_country}"
+            
+            if group_key not in summary:
+                # 2. Logika Pengisian Koordinat Otomatis
+                # Coba ambil dari ES dulu, kalau null ambil dari GEO_MAP berdasarkan kode negara
+                s_lon = src_data.get("source", {}).get("geo", {}).get("location", {}).get("lon") or GEO_MAP.get(country, {}).get("lon")
+                s_lat = src_data.get("source", {}).get("geo", {}).get("location", {}).get("lat") or GEO_MAP.get(country, {}).get("lat")
+                d_lon = src_data.get("destination", {}).get("geo", {}).get("location", {}).get("lon") or GEO_MAP.get(dest_country, {}).get("lon")
+                d_lat = src_data.get("destination", {}).get("geo", {}).get("location", {}).get("lat") or GEO_MAP.get(dest_country, {}).get("lat")
+
+                summary[group_key] = {
+                    "country": country,
+                    "destination_country": dest_country,
+                    "event_type": "sophos" if is_sophos else event_mod,
+                    "severity": src_data.get("event", {}).get("severity_label") or extract_sophos("severity") or "High",
+                    "count": 0,
+                    "source_longitude": s_lon,
+                    "source_latitude": s_lat,
+                    "destination_longitude": d_lon,
+                    "destination_latitude": d_lat,
+                }
+            
+            summary[group_key]["count"] += 1
+
+        final_results = list(summary.values())
+        final_results.sort(key=lambda x: x['count'], reverse=True)
+
+        return final_results[:5]
 
     except Exception as e:
         print(f"❌ Error Global Attack: {e}")

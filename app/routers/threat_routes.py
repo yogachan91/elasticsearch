@@ -59,33 +59,33 @@ def verify_internal_access(x_internal_service_key: str = Header(None, alias="X-I
             detail=f"Forbidden: Key mismatch. Received: {x_internal_service_key}"
         )
 
-def evaluate_condition(event: dict, f: FilterItem) -> bool:
-    """Helper untuk mengecek apakah satu event memenuhi satu kriteria filter"""
-    field = f.field
-    val_filter = str(f.value).lower()
-    val_event = str(event.get(field, "")).lower()
+# def evaluate_condition(event: dict, f: FilterItem) -> bool:
+#     """Helper untuk mengecek apakah satu event memenuhi satu kriteria filter"""
+#     field = f.field
+#     val_filter = str(f.value).lower()
+#     val_event = str(event.get(field, "")).lower()
 
-    if f.operator == "is":
-        return val_event == val_filter
+#     if f.operator == "is":
+#         return val_event == val_filter
     
-    elif f.operator == "is_not":
-        return val_event != val_filter
+#     elif f.operator == "is_not":
+#         return val_event != val_filter
     
-    elif f.operator == "contains":
-        return val_filter in val_event
+#     elif f.operator == "contains":
+#         return val_filter in val_event
     
-    elif f.operator == "exists":
-        return event.get(field) is not None
+#     elif f.operator == "exists":
+#         return event.get(field) is not None
     
-    elif f.operator == ">":
-        try: return float(event.get(field)) > float(f.value)
-        except: return False
+#     elif f.operator == ">":
+#         try: return float(event.get(field)) > float(f.value)
+#         except: return False
         
-    elif f.operator == "<":
-        try: return float(event.get(field)) < float(f.value)
-        except: return False
+#     elif f.operator == "<":
+#         try: return float(event.get(field)) < float(f.value)
+#         except: return False
         
-    return False   
+#     return False   
 
 
 @router.post("/events/filter", dependencies=[Depends(verify_internal_access)])
