@@ -1446,7 +1446,7 @@ def calculate_global_stats(timeframe):
     # Siapkan filter 5 menit lalu
     jakarta_tz = ZoneInfo("Asia/Jakarta")
     now = datetime.now(tz=jakarta_tz)
-    five_min_ago = (now - timedelta(seconds=3)).isoformat()
+    five_min_ago = (now - timedelta(seconds=5)).isoformat()
 
     query = {
         "size": 0,
