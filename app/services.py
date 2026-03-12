@@ -128,8 +128,40 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
 
             # --- A. LOGIKA MAPPING FIELD ---
             if field == "severity":
-                target_fields = ["event.severity_label", "log.syslog.severity.name"]
-                sophos_extra_filter = {"match_phrase": {"message": f"severity=\"{val}\""}}
+                # target_fields = ["event.severity_label", "log.syslog.severity.name"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"severity=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"event.severity_label": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'severity="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "mitre_stages":
                 mitre_mapping = {
                     "Initial Attempts": ["Initial", "Reconnaissance"],
@@ -148,29 +180,221 @@ def get_combined_events(es, timeframe, filters=None, search_query=None, logic="A
                     }
                 }
             elif field == "source_ip":
-                target_fields = ["source.ip"]
-                # Tambahkan logika khusus untuk mencari teks src_ip di dalam message
-                sophos_extra_filter = {"match_phrase": {"message": f"src_ip=\"{val}\""}}
+                # target_fields = ["source.ip"]
+                # # Tambahkan logika khusus untuk mencari teks src_ip di dalam message
+                # sophos_extra_filter = {"match_phrase": {"message": f"src_ip=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"source.ip": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'src_ip="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "destination_ip":
-                target_fields = ["destination.ip"]
-                sophos_extra_filter = {"match_phrase": {"message": f"dst_ip=\"{val}\""}}
+                # target_fields = ["destination.ip"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"dst_ip=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"destination.ip": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'dst_ip="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "country":
-                target_fields = ["source.geo.country_name"]
-                sophos_extra_filter = {"match_phrase": {"message": f"src_country=\"{val}\""}}
+                # target_fields = ["source.geo.country_name"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"src_country=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"source.geo.country_name": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'src_country="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "destination_country":
-                target_fields = ["destination.geo.country_name"]
-                sophos_extra_filter = {"match_phrase": {"message": f"dst_country=\"{val}\""}}
+                # target_fields = ["destination.geo.country_name"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"dst_country=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"destination.geo.country_name": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'dst_country="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "event_type":
                 val_l = val.lower()
                 dataset_val = "sophos.xg" if val_l == "sophos" else ("panw.panos" if val_l == "panw" else val_l)
                 target_fields = ["event.module", "event.dataset"]
                 val = dataset_val # Update nilai untuk term query
             elif field == "protocol":
-                target_fields = ["network.transport"]
-                sophos_extra_filter = {"match_phrase": {"message": f"protocol=\"{val}\""}}
+                # target_fields = ["network.transport"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"protocol=\"{val}\""}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"network.transport": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'protocol="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             elif field == "port":
-                target_fields = ["destination.port", "dst_port", "dest.port"]
-                sophos_extra_filter = {"match_phrase": {"message": f"dst_port={val}"}}
+                # target_fields = ["destination.port", "dst_port", "dest.port"]
+                # sophos_extra_filter = {"match_phrase": {"message": f"dst_port={val}"}}
+                clause = {
+                    "bool": {
+                        "should": [
+
+                        # SURICATA
+                        {       
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "suricata"}},
+                                    {"term": {"destination.port": val}}
+                                ]
+                            }
+                        },
+
+                        # SOPHOS
+                        {
+                            "bool": {
+                            "must": [
+                                    {"term": {"event.module": "sophos"}},
+                                    {
+                                        "match_phrase": {
+                                        "message": f'dst_port="{val}"'
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+
+                    ],
+                    "minimum_should_match": 1
+                    }
+                    }
             else:
                 target_fields = [field]
 
@@ -1222,7 +1446,7 @@ def calculate_global_stats(timeframe):
     # Siapkan filter 5 menit lalu
     jakarta_tz = ZoneInfo("Asia/Jakarta")
     now = datetime.now(tz=jakarta_tz)
-    five_min_ago = (now - timedelta(minutes=1)).isoformat()
+    five_min_ago = (now - timedelta(seconds=3)).isoformat()
 
     query = {
         "size": 0,
